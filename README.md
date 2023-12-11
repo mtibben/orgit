@@ -20,9 +20,9 @@ export GRIT_WORKSPACE=~/Developer/src          # Set the current directory as th
                                                # that mirrors the URL structure remote git repositories.
 grit get github.com/<ORG-NAME>/<PROJECT-NAME>  # Clone a repo from GitHub or Gitlab using the project URL. The repo will be cloned
                                                #   into $GRIT_WORKSPACE/github.com/<ORG-NAME>/<PROJECT-NAME>
-grit sync github.com/<ORG-NAME>                 # Clone all remote repos from a GitHub or Gitlab org in parallel.
-grit get --archive                             #   --archive:    Move local repos that are not found remotely to `$GRIT_WORKSPACE/.archive/`
-grit get --pristine                            #   --pristine:   Restore local repos to pristine state with stash, reset, clean
+grit sync github.com/<ORG-NAME>                # Clone all remote repos from a GitHub or Gitlab org in parallel.
+grit sync github.com//<ORG-NAME> --archive     #   --archive:    Move local repos that are not found remotely to `$GRIT_WORKSPACE/.archive/`
+grit sync --pristine                            #   --pristine:   Restore local repos to pristine state with stash, reset, clean
 grit get --pristine --except-for my-repo       #   --except-for: Except for repos that match the 'my-repo' glob
 grit list                                      # List all local repos in the workspace
 grit status                                    # Show the status of all local repos that have changes

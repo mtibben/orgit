@@ -1,23 +1,76 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"net/url"
 	"os"
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"sync"
+	"sync/atomic"
+	"time"
 
+	"github.com/egymgmbh/go-prefix-writer/prefixer"
+	"github.com/fatih/color"
 	"github.com/google/go-github/v57/github"
 	"github.com/jdxcode/netrc"
 	"github.com/spf13/cobra"
 	errgroup "golang.org/x/sync/errgroup"
 )
 
+type ProgressWriter struct {
+	Complete atomic.Uint32
+	Total    atomic.Uint32
+
+	doneChan  chan bool
+	waitGroup sync.WaitGroup
+	ticker    *time.Ticker
+}
+
+func NewProgressWriter() *ProgressWriter {
+	return &ProgressWriter{
+		doneChan:  make(chan bool),
+		waitGroup: sync.WaitGroup{},
+		ticker:    time.NewTicker(time.Second),
+	}
+}
+
+func (p *ProgressWriter) Start() {
+	p.waitGroup.Add(1)
+	go func() {
+		defer p.waitGroup.Done()
+
+		fmt.Print(saveCursorPosition)
+		for {
+			select {
+			case <-p.ticker.C:
+				fmt.Print(clearLine)
+				fmt.Printf("Synced %d of %d repos", p.Complete.Load(), p.Total.Load())
+			case <-p.doneChan:
+				fmt.Print(clearLine)
+				fmt.Printf("Synced %d of %d repos", p.Complete.Load(), p.Total.Load())
+				fmt.Println()
+				return
+			}
+		}
+	}()
+}
+
+func (p *ProgressWriter) Stop() {
+	p.ticker.Stop()
+	p.doneChan <- true
+	p.waitGroup.Wait()
+}
+
 var parseOrgUrl = regexp.MustCompile("(https?://)?github.com/(?P<org>[^/]+)")
 
-func init() {
+var saveCursorPosition = "\033[s"
+var clearLine = "\033[u\033[K"
 
+func init() {
 	var cmdSync = &cobra.Command{
 		Use:  "sync [flags] ORG_URL",
 		Args: cobra.ExactArgs(1),
@@ -36,25 +89,56 @@ func init() {
 			g, _ := errgroup.WithContext(cmd.Context())
 			workerPoolJobChan := make(repoChan, 20)
 			ctxWorkerPool := context.Background()
+
+			progressWriter := NewProgressWriter()
+			progressWriter.Start()
+
 			go func(ctxWorkerPool context.Context) {
+
 				for {
 					select {
 					case repo := <-workerPoolJobChan:
+						progressWriter.Total.Add(1)
 						g.Go(func() error {
+							defer progressWriter.Complete.Add(1)
 							gitUrlStr := repo.GetCloneURL()
 							gitUrl, _ := url.Parse(gitUrlStr)
 							localDir := getLocalDir(gitUrl)
 
-							err := doGet(gitUrl, "", localDir, false, true)
+							relDir, _ := filepath.Rel(getWorkspaceDir(), localDir)
+
+							progressType := "progressbar"
+							c := cmdContext{}
+							if progressType == "simple" {
+								prefixWriter := prefixer.New(os.Stdout, func() string {
+									return color.GreenString("[%s] ", relDir)
+								})
+
+								c = cmdContext{
+									Stdout:   prefixWriter,
+									Stderr:   prefixWriter,
+									EchoFunc: color.Cyan,
+								}
+							} else {
+								c = cmdContext{
+									Stdout:   &bytes.Buffer{},
+									Stderr:   &bytes.Buffer{},
+									EchoFunc: func(format string, a ...interface{}) {},
+								}
+							}
+
+							err := c.doGet(gitUrl, "", localDir, false, false)
 							if err != nil {
 								return err
 							}
+
 							return nil
 						})
 					case <-ctxWorkerPool.Done():
 						break
 					}
 				}
+
 			}(ctxWorkerPool)
 			defer ctxWorkerPool.Done()
 
@@ -68,6 +152,7 @@ func init() {
 				os.Exit(1)
 			}
 
+			progressWriter.Stop()
 		},
 	}
 
@@ -93,7 +178,7 @@ func getGithubClient(ctx context.Context) *github.Client {
 func listAllReposInOrg(ctx context.Context, client *github.Client, org string, workerPoolJobChan repoChan) error {
 	opt := &github.RepositoryListByOrgOptions{
 		ListOptions: github.ListOptions{
-			PerPage: 20,
+			PerPage: 40,
 		},
 	}
 	for {
