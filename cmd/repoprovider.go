@@ -22,7 +22,7 @@ type RepoProvider interface {
 	IsMatch(s string) bool
 	NormaliseGitUrl(s string) string
 	GetOrgFromUrl(orgUrl string) (string, error)
-	ListRepos(ctx context.Context, org string, cloneUrlFunc func(string)) error
+	ListRepos(ctx context.Context, org string, repoUrlCallback func(string)) error
 }
 
 func RepoProviderFor(s string) (RepoProvider, error) {
@@ -57,7 +57,7 @@ func (p genericRepoProvider) GetOrgFromUrl(orgUrlArg string) (string, error) {
 	return p.orgRegexp.FindStringSubmatch(orgUrlArg)[orgIndex], nil
 }
 
-func (p genericRepoProvider) ListRepos(ctx context.Context, org string, cloneUrlFunc func(string)) error {
+func (p genericRepoProvider) ListRepos(ctx context.Context, org string, repoUrlCallback func(string)) error {
 	return fmt.Errorf("no ListRepos implementation for '%s'", p.prefix)
 }
 
@@ -86,7 +86,7 @@ func (gh GithubRepoProvider) getClient(ctx context.Context) *github.Client {
 	return github.NewClient(nil)
 }
 
-func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, cloneUrlFunc func(string)) error {
+func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, repoUrlCallback func(string)) error {
 	client := gh.getClient(ctx)
 	opt := &github.RepositoryListByOrgOptions{
 		ListOptions: github.ListOptions{
@@ -101,7 +101,7 @@ func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, cloneUrl
 
 		for _, repo := range repos {
 			if !repo.GetArchived() {
-				cloneUrlFunc(repo.GetCloneURL())
+				repoUrlCallback(repo.GetCloneURL())
 			}
 		}
 

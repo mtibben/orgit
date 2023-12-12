@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/99designs/grit/syncprinter"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +24,7 @@ func printDirs(baseDir, dir string, printFullPath, flagDirty bool) {
 	if flagDirty {
 		out, err := doExecQuietWithOutput(fullDir, "git status --porcelain")
 		if err != nil {
-			syncPrintStdErrln(err.Error())
+			syncprinter.Println(err.Error())
 			return
 		}
 

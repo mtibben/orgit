@@ -1,66 +1,69 @@
 package cmd
 
 import (
-	"fmt"
 	"os"
-	"sync"
 	"sync/atomic"
-	"time"
+
+	"github.com/99designs/grit/syncprinter"
 )
 
 const ansiSaveCursorPosition = "\033[s"
 const ansiClearLine = "\033[u\033[K"
 
 type ProgressWriter struct {
-	Complete atomic.Uint32
-	Total    atomic.Uint32
-
-	doneChan  chan bool
-	waitGroup sync.WaitGroup
-	ticker    *time.Ticker
+	enabled  bool
+	complete atomic.Uint32
+	total    atomic.Uint32
+	printer  *syncprinter.Printer
+	printed  bool
 }
 
-func NewProgressWriter() *ProgressWriter {
+func (p *ProgressWriter) AddTotal(n uint32) {
+	p.total.Add(n)
+	p.PrintProgress()
+}
+
+func (p *ProgressWriter) AddComplete(n uint32) {
+	p.complete.Add(n)
+	p.PrintProgress()
+}
+
+func NewProgressWriter(enabled bool) *ProgressWriter {
 	return &ProgressWriter{
-		doneChan:  make(chan bool),
-		waitGroup: sync.WaitGroup{},
-		ticker:    time.NewTicker(500 * time.Millisecond),
+		printer: syncprinter.NewPrinter(os.Stderr),
+		enabled: enabled,
 	}
 }
 
-func (p *ProgressWriter) PrintProgress(newline bool) {
-	total := p.Total.Load()
+func (p *ProgressWriter) PrintProgress() {
+	if !p.enabled {
+		return
+	}
+
+	total := p.total.Load()
 	if total > 0 {
-		fmt.Fprint(os.Stderr, ansiClearLine)
-		fmt.Fprintf(os.Stderr, "Syncing repos... %d/%d", p.Complete.Load(), total)
-		if newline {
-			fmt.Fprint(os.Stderr, "\n")
+		firstChar := ansiClearLine
+		if !p.printed {
+			firstChar = ansiSaveCursorPosition
+			p.printed = true
 		}
+		p.printer.Printf("%sSyncing repos... %d/%d", firstChar, p.complete.Load(), total)
 	}
 }
 
-func (p *ProgressWriter) Start() {
-	p.waitGroup.Add(1)
-	go func() {
-		defer p.waitGroup.Done()
+func (p *ProgressWriter) Println(s string) {
+	if !p.enabled {
+		return
+	}
 
-		fmt.Fprint(os.Stderr, ansiSaveCursorPosition)
-
-		for {
-			select {
-			case <-p.ticker.C:
-				p.PrintProgress(false)
-
-			case <-p.doneChan:
-				p.PrintProgress(true)
-				return
-			}
-		}
-	}()
+	p.printer.Print(ansiClearLine + s + "\n" + ansiSaveCursorPosition)
+	p.PrintProgress()
 }
 
-func (p *ProgressWriter) Stop() {
-	p.ticker.Stop()
-	p.doneChan <- true
-	p.waitGroup.Wait()
+func (p *ProgressWriter) Done() {
+	if !p.enabled {
+		return
+	}
+
+	p.printer.Println("\nDone")
 }

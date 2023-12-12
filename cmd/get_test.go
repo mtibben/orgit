@@ -21,11 +21,6 @@ func TestGetArgs(t *testing.T) {
 	}
 
 	for i, tt := range tableTests {
-		// if tt.mockCwd != "" {
-		// 	osGetwd = func() (string, error) { return tt.mockCwd, nil }
-		// } else {
-		// 	osGetwd = func() (string, error) { return "/home/user", nil }
-		// }
 		osUserHomeDir = func() (string, error) { return "/home/user", nil }
 
 		projectUrl, commitOrBranch, err := parseArgsForGetCmd(tt.args)

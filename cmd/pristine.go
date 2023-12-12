@@ -6,6 +6,7 @@ import (
 	"sync"
 	"unicode"
 
+	"github.com/99designs/grit/syncprinter"
 	"github.com/spf13/cobra"
 )
 
@@ -42,31 +43,31 @@ func doExecQuietWithOutput(dir string, shCmd string) (string, error) {
 func doPristine(path string) {
 	err := doExecQuiet(path, `git fetch`)
 	if err != nil {
-		syncPrintln(err.Error())
+		syncprinter.Println(err.Error())
 		return
 	}
 
 	commit, err := doExecQuietWithOutput(path, `git symbolic-ref --short refs/remotes/origin/HEAD`)
 	if err != nil {
-		syncPrintln(err.Error())
+		syncprinter.Println(err.Error())
 		return
 	}
 
 	err = doExecQuiet(path, `git stash -u`)
 	if err != nil {
-		syncPrintln(err.Error())
+		syncprinter.Println(err.Error())
 		return
 	}
 
 	err = doExecQuiet(path, fmt.Sprintf(`git reset --hard %s`, commit))
 	if err != nil {
-		syncPrintln(err.Error())
+		syncprinter.Println(err.Error())
 		return
 	}
 
 	err = doExecQuiet(path, `git clean -ffdx`)
 	if err != nil {
-		syncPrintln(err.Error())
+		syncprinter.Println(err.Error())
 		return
 	}
 }

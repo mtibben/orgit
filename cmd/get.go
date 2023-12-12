@@ -198,6 +198,10 @@ func (c *cmdContext) doGet(gitUrl *url.URL, branchOrCommit, dir string, pristine
 		if branchOrCommit == "" {
 			defaultBranch, err := doExec(dir, `git symbolic-ref --short refs/remotes/origin/HEAD`)
 			if err != nil {
+				logOut, err2 := doExec(dir, `git log -n 1`)
+				if err2 != nil && strings.Contains(logOut, "does not have any commits yet") {
+					return nil // nothing we can do on a repo without commits
+				}
 				return err
 			}
 			defaultBranch = strings.TrimPrefix(defaultBranch, "origin/")
@@ -255,7 +259,6 @@ func (c *cmdContext) doGet(gitUrl *url.URL, branchOrCommit, dir string, pristine
 			}
 		}
 	} else {
-
 		gitCloneArgs := "--recursive"
 		if quiet {
 			gitCloneArgs = "--recursive --quiet"

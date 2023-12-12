@@ -16,6 +16,7 @@ import (
 
 func init() {
 	pristine := false
+	progress := "auto"
 
 	var cmdSync = &cobra.Command{
 		Use:   "sync [flags] ORG_URL",
@@ -23,7 +24,7 @@ func init() {
 		Short: `Clone or pull a collection of repos from GitHub or Gitlab in parallel`,
 		Run: func(cmd *cobra.Command, args []string) {
 			orgUrlArg := args[0]
-			err := doSync(cmd.Context(), orgUrlArg, pristine)
+			err := doSync(cmd.Context(), orgUrlArg, pristine, progress)
 			if err != nil {
 				cmd.PrintErrln(err)
 				os.Exit(1)
@@ -32,11 +33,12 @@ func init() {
 	}
 
 	cmdSync.Flags().BoolVar(&pristine, "pristine", false, "Stash, reset and clean the repo first")
+	cmdSync.Flags().StringVar(&progress, "progress", "auto", "Set type of progress output (auto, tty, plain)")
 
 	rootCmd.AddCommand(cmdSync)
 }
 
-func doSync(ctx context.Context, orgUrlStr string, pristine bool) error {
+func doSync(ctx context.Context, orgUrlStr string, pristine bool, progress string) error {
 	org := ""
 	provider, err := RepoProviderFor(orgUrlStr)
 	if err != nil {
@@ -56,13 +58,9 @@ func doSync(ctx context.Context, orgUrlStr string, pristine bool) error {
 	localDir := getLocalDir(orgUrl)
 	fmt.Fprintf(os.Stderr, "Syncing to '%s'\n", localDir)
 
-	progressWriter := NewProgressWriter()
-	progressWriter.Start()
-	defer progressWriter.Stop()
+	workerPool := NewSyncReposWorkerPool(pristine, progress)
 
-	workerPool := NewSyncReposWorkerPool(progressWriter, pristine)
-
-	err = provider.ListRepos(ctx, org, workerPool.AddCloneUrl)
+	err = provider.ListRepos(ctx, org, workerPool.GoCloneUrl)
 	if err != nil {
 		return fmt.Errorf("couldn't list repos for '%s': %w", orgUrlStr, err)
 	}
@@ -74,65 +72,72 @@ func doSync(ctx context.Context, orgUrlStr string, pristine bool) error {
 	return nil
 }
 
-// type cloneUrlChan chan string
-
 type syncReposWorkerPool struct {
 	errorPool      *pool.ErrorPool
 	progressWriter *ProgressWriter
 	pristine       bool
+	progressType   string
 }
 
-func NewSyncReposWorkerPool(progressWriter *ProgressWriter, pristine bool) *syncReposWorkerPool {
-	return &syncReposWorkerPool{
-		progressWriter: progressWriter,
+func NewSyncReposWorkerPool(pristine bool, progressType string) *syncReposWorkerPool {
+	wp := syncReposWorkerPool{
 		pristine:       pristine,
 		errorPool:      pool.New().WithErrors(),
+		progressType:   progressType,
+		progressWriter: NewProgressWriter(progressType == "auto"),
 	}
+	return &wp
 }
 
-func (p *syncReposWorkerPool) AddCloneUrl(cloneUrlStr string) {
-	p.progressWriter.Total.Add(1)
+func (p *syncReposWorkerPool) GoCloneUrl(cloneUrlStr string) {
+	p.progressWriter.AddTotal(1)
 	p.errorPool.Go(func() error {
-		return doWork(cloneUrlStr, p.progressWriter, p.pristine)
+		return p.doWork(cloneUrlStr)
 	})
 }
 
 func (p *syncReposWorkerPool) Wait() error {
-	return p.errorPool.Wait()
+	err := p.errorPool.Wait()
+	if err == nil {
+		p.progressWriter.Done()
+	}
+	return err
 }
 
-func doWork(cloneUrlStr string, progressWriter *ProgressWriter, pristine bool) error {
-	gitUrl, _ := url.Parse(cloneUrlStr)
-	localDir := getLocalDir(gitUrl)
-
+func (p *syncReposWorkerPool) GetCmdContext(localDir string) cmdContext {
 	relDir, _ := filepath.Rel(getWorkspaceDir(), localDir)
 
-	progressType := "progressbar"
-	c := cmdContext{}
-	if progressType == "simple" {
+	if p.progressType == "plain" {
 		prefixWriter := prefixer.New(os.Stdout, func() string {
 			return color.GreenString("[%s] ", relDir)
 		})
 
-		c = cmdContext{
+		return cmdContext{
 			Stdout:   prefixWriter,
 			Stderr:   prefixWriter,
 			EchoFunc: color.Cyan,
 		}
 	} else {
-		c = cmdContext{
+		return cmdContext{
 			Stdout:   &bytes.Buffer{},
 			Stderr:   &bytes.Buffer{},
 			EchoFunc: func(format string, a ...interface{}) {},
 		}
 	}
+}
 
-	err := c.doGet(gitUrl, "", localDir, pristine, false)
+func (p *syncReposWorkerPool) doWork(cloneUrlStr string) error {
+	gitUrl, _ := url.Parse(cloneUrlStr)
+	localDir := getLocalDir(gitUrl)
+	c := p.GetCmdContext(localDir)
+
+	err := c.doGet(gitUrl, "", localDir, p.pristine, false)
 	if err != nil {
 		return err
 	}
 
-	progressWriter.Complete.Add(1)
+	p.progressWriter.Println("Synced " + localDir)
+	p.progressWriter.AddComplete(1)
 
 	return nil
 }

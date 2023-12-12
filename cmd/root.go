@@ -4,20 +4,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/spf13/cobra"
 )
 
-func syncPrintln(a ...any) {
-	doSyncFunc(func() {
-		fmt.Println(a...)
-	})
-}
+var doMutex = sync.Mutex{}
 
-func syncPrintStdErrln(a ...any) {
-	doSyncFunc(func() {
-		fmt.Fprintln(os.Stderr, a...)
-	})
+func do(f func()) {
+	doMutex.Lock()
+	defer doMutex.Unlock()
+	f()
 }
 
 func getWorkspaceDir() string {
@@ -35,7 +32,7 @@ func getWorkspaceDir() string {
 
 var rootCmd = &cobra.Command{
 	Use:   "grit",
-	Short: "Grit is a tool for interacting with multiple repos concurrently",
+	Short: "Grit is a tool for organising git repositories",
 }
 
 func Execute() {

@@ -8,21 +8,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var outputMutex sync.Mutex
-
-func doSyncFunc(f func()) {
-	outputMutex.Lock()
-	defer outputMutex.Unlock()
-	f()
-}
-
 func doExecCmd(path string, theCmd string) {
 	cmd := newShellCmd(theCmd)
 	cmd.Dir = path
 	out, err := cmd.CombinedOutput()
 	outStr := strings.TrimSpace(string(out))
 
-	doSyncFunc(func() {
+	do(func() {
 		if len(outStr) > 0 || err != nil {
 			exitCode := cmd.ProcessState.ExitCode()
 			fmt.Printf("in %s: exit status %d\n", path, exitCode)

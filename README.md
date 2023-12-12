@@ -73,7 +73,7 @@ machine gitlab.com
  - https://gitslave.sourceforge.net/
  - https://github.com/orf/git-workspace
  - https://luke_titley.gitlab.io/git-poly/
- - github.com/grdl/git-get
+ - https://github.com/grdl/git-get
  - https://github.com/fboender/multi-git-status
- - github.com/x-motemen/ghq
+ - https://github.com/x-motemen/ghq
 
