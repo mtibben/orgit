@@ -22,7 +22,7 @@ type RepoProvider interface {
 	IsMatch(s string) bool
 	NormaliseGitUrl(s string) string
 	GetOrgFromUrl(orgUrl string) (string, error)
-	ListRepos(ctx context.Context, org string, jobChan cloneUrlChan) error
+	ListRepos(ctx context.Context, org string, cloneUrlFunc func(string)) error
 }
 
 func RepoProviderFor(s string) (RepoProvider, error) {
@@ -57,7 +57,7 @@ func (p genericRepoProvider) GetOrgFromUrl(orgUrlArg string) (string, error) {
 	return p.orgRegexp.FindStringSubmatch(orgUrlArg)[orgIndex], nil
 }
 
-func (p genericRepoProvider) ListRepos(ctx context.Context, org string, jobChan cloneUrlChan) error {
+func (p genericRepoProvider) ListRepos(ctx context.Context, org string, cloneUrlFunc func(string)) error {
 	return fmt.Errorf("no ListRepos implementation for '%s'", p.prefix)
 }
 
@@ -86,7 +86,7 @@ func (gh GithubRepoProvider) getClient(ctx context.Context) *github.Client {
 	return github.NewClient(nil)
 }
 
-func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, jobChan cloneUrlChan) error {
+func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, cloneUrlFunc func(string)) error {
 	client := gh.getClient(ctx)
 	opt := &github.RepositoryListByOrgOptions{
 		ListOptions: github.ListOptions{
@@ -101,7 +101,7 @@ func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, jobChan 
 
 		for _, repo := range repos {
 			if !repo.GetArchived() {
-				jobChan <- repo.GetCloneURL()
+				cloneUrlFunc(repo.GetCloneURL())
 			}
 		}
 
@@ -148,7 +148,7 @@ func (gl GitlabRepoProvider) getClient(ctx context.Context) (*gitlab.Client, err
 	return gitlab.NewClient(gitlabToken)
 }
 
-func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, jobChan cloneUrlChan) error {
+func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, cloneUrlFunc func(string)) error {
 	client, err := gl.getClient(ctx)
 	if err != nil {
 		return err
@@ -170,7 +170,7 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, jobChan 
 			return err
 		}
 		for _, p := range ps {
-			jobChan <- p.HTTPURLToRepo
+			cloneUrlFunc(p.HTTPURLToRepo)
 		}
 
 		// Exit the loop when we've seen all pages.

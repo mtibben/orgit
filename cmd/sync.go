@@ -10,8 +10,8 @@ import (
 
 	"github.com/egymgmbh/go-prefix-writer/prefixer"
 	"github.com/fatih/color"
+	"github.com/sourcegraph/conc/pool"
 	"github.com/spf13/cobra"
-	errgroup "golang.org/x/sync/errgroup"
 )
 
 func init() {
@@ -60,11 +60,9 @@ func doSync(ctx context.Context, orgUrlStr string, pristine bool) error {
 	progressWriter.Start()
 	defer progressWriter.Stop()
 
-	workerPool := syncReposWorkerPool{}
-	jobChan := workerPool.Start(ctx, progressWriter, pristine)
-	defer workerPool.Stop()
+	workerPool := NewSyncReposWorkerPool(progressWriter, pristine)
 
-	err = provider.ListRepos(ctx, org, jobChan)
+	err = provider.ListRepos(ctx, org, workerPool.AddCloneUrl)
 	if err != nil {
 		return fmt.Errorf("couldn't list repos for '%s': %w", orgUrlStr, err)
 	}
@@ -76,71 +74,65 @@ func doSync(ctx context.Context, orgUrlStr string, pristine bool) error {
 	return nil
 }
 
-type cloneUrlChan chan string
+// type cloneUrlChan chan string
 
 type syncReposWorkerPool struct {
-	ctxWorkerPool context.Context
-	g             *errgroup.Group
+	errorPool      *pool.ErrorPool
+	progressWriter *ProgressWriter
+	pristine       bool
 }
 
-func (p *syncReposWorkerPool) Start(ctx context.Context, progressWriter *ProgressWriter, pristine bool) cloneUrlChan {
-	p.ctxWorkerPool = context.Background()
-	workerPoolJobChan := make(cloneUrlChan, 20)
-	p.g, _ = errgroup.WithContext(ctx)
-
-	go func() {
-		for {
-			select {
-			case cloneUrlStr := <-workerPoolJobChan:
-				progressWriter.Total.Add(1)
-				p.g.Go(func() error {
-					gitUrl, _ := url.Parse(cloneUrlStr)
-					localDir := getLocalDir(gitUrl)
-
-					relDir, _ := filepath.Rel(getWorkspaceDir(), localDir)
-
-					progressType := "progressbar"
-					c := cmdContext{}
-					if progressType == "simple" {
-						prefixWriter := prefixer.New(os.Stdout, func() string {
-							return color.GreenString("[%s] ", relDir)
-						})
-
-						c = cmdContext{
-							Stdout:   prefixWriter,
-							Stderr:   prefixWriter,
-							EchoFunc: color.Cyan,
-						}
-					} else {
-						c = cmdContext{
-							Stdout:   &bytes.Buffer{},
-							Stderr:   &bytes.Buffer{},
-							EchoFunc: func(format string, a ...interface{}) {},
-						}
-					}
-
-					err := c.doGet(gitUrl, "", localDir, pristine, false)
-					if err != nil {
-						return err
-					}
-
-					progressWriter.Complete.Add(1)
-
-					return nil
-				})
-			case <-p.ctxWorkerPool.Done():
-				break
-			}
-		}
-	}()
-
-	return workerPoolJobChan
+func NewSyncReposWorkerPool(progressWriter *ProgressWriter, pristine bool) *syncReposWorkerPool {
+	return &syncReposWorkerPool{
+		progressWriter: progressWriter,
+		pristine:       pristine,
+		errorPool:      pool.New().WithErrors(),
+	}
 }
 
-func (p *syncReposWorkerPool) Stop() {
-	p.ctxWorkerPool.Done()
+func (p *syncReposWorkerPool) AddCloneUrl(cloneUrlStr string) {
+	p.progressWriter.Total.Add(1)
+	p.errorPool.Go(func() error {
+		return doWork(cloneUrlStr, p.progressWriter, p.pristine)
+	})
 }
 
 func (p *syncReposWorkerPool) Wait() error {
-	return p.g.Wait()
+	return p.errorPool.Wait()
+}
+
+func doWork(cloneUrlStr string, progressWriter *ProgressWriter, pristine bool) error {
+	gitUrl, _ := url.Parse(cloneUrlStr)
+	localDir := getLocalDir(gitUrl)
+
+	relDir, _ := filepath.Rel(getWorkspaceDir(), localDir)
+
+	progressType := "progressbar"
+	c := cmdContext{}
+	if progressType == "simple" {
+		prefixWriter := prefixer.New(os.Stdout, func() string {
+			return color.GreenString("[%s] ", relDir)
+		})
+
+		c = cmdContext{
+			Stdout:   prefixWriter,
+			Stderr:   prefixWriter,
+			EchoFunc: color.Cyan,
+		}
+	} else {
+		c = cmdContext{
+			Stdout:   &bytes.Buffer{},
+			Stderr:   &bytes.Buffer{},
+			EchoFunc: func(format string, a ...interface{}) {},
+		}
+	}
+
+	err := c.doGet(gitUrl, "", localDir, pristine, false)
+	if err != nil {
+		return err
+	}
+
+	progressWriter.Complete.Add(1)
+
+	return nil
 }
