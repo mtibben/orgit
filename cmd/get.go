@@ -1,10 +1,8 @@
 package cmd
 
 import (
-	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/url"
 	"os"
 	"os/exec"
@@ -16,37 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type RepoProvider struct {
-	prefix       string
-	appendPrefix string
-	appendSuffix string
-}
-
-func (p RepoProvider) IsMatch(s string) bool {
-	return strings.HasPrefix(s, p.prefix)
-}
-
-func (p RepoProvider) NormaliseGitUrl(s string) string {
-	return p.appendPrefix + s + p.appendSuffix
-}
-
-var KnownGitProviders = []RepoProvider{
-	{"github.com/", "https://", ".git"},
-	{"gitlab.com/", "https://", ".git"},
-}
-
-// const defaultBaseUrl = "https://gitlab.com/vistaprint-org"
-
-// var osGetwd = os.Getwd
 var osUserHomeDir = os.UserHomeDir
-
-// func mustGetCwd() string {
-// 	cwd, err := osGetwd()
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	return cwd
-// }
 
 func mustParseGitRepo(s string) *url.URL {
 	u, err := url.Parse(s)
@@ -109,33 +77,22 @@ func newShellCmd(shCmd string) *exec.Cmd {
 	return exec.Command("sh", "-c", shCmd)
 }
 
-// func newShellCmd(shCmd string) *exec.Cmd {
-// 	args, err := shellwords.Parse(shCmd)
+// func mustDoExec(dir string, shCmd string) string {
+// 	out, err := doExec(dir, shCmd)
 // 	if err != nil {
 // 		panic(err)
 // 	}
-// 	return exec.Command(args[0], args[1:]...)
+// 	return out
 // }
-
-func mustExec(dir string, shCmd string) string {
-	out, err := doExec(dir, shCmd)
-	if err != nil {
-		fmt.Printf("in directory '%s' executing '%s': %s\n", dir, shCmd, out)
-		panic(err)
-	}
-	return out
-}
 
 func doExec(dir string, shCmd string) (string, error) {
 	cmd := newShellCmd(shCmd)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
+	if err != nil {
+		err = fmt.Errorf("error executing '%s' in directory '%s': %w", shCmd, dir, err)
+	}
 	return strings.TrimSpace(string(out)), err
-}
-
-func isGitDirty(dir string) bool {
-	return mustExec(dir, "git status --porcelain") != ""
-	// return mustExec(dir, "git diff-index HEAD") != "" // fails when HEAD is not present
 }
 
 func dirExists(dir string) bool {
@@ -146,11 +103,11 @@ func dirExists(dir string) bool {
 	return info.IsDir()
 }
 
-func (c *cmdContext) mustEchoEvalf(dir, shCmd string, a ...any) {
-	c.mustEchoEval(dir, fmt.Sprintf(shCmd, a...))
+func (c *cmdContext) echoEvalf(dir, shCmd string, a ...any) error {
+	return c.echoEval(dir, fmt.Sprintf(shCmd, a...))
 }
 
-func (c *cmdContext) mustEchoEval(dir, shCmd string) {
+func (c *cmdContext) echoEval(dir, shCmd string) error {
 	c.EchoFunc(" + %s", shCmd)
 	cmd := newShellCmd(shCmd)
 	cmd.Dir = dir
@@ -158,8 +115,9 @@ func (c *cmdContext) mustEchoEval(dir, shCmd string) {
 	cmd.Stderr = c.Stderr
 	err := cmd.Run()
 	if err != nil {
-		log.Fatalf("in directory '%s' executing '%s': %s", dir, shCmd, err)
+		return fmt.Errorf("error executing '%s' in directory '%s': %w", shCmd, dir, err)
 	}
+	return nil
 }
 
 func init() {
@@ -187,6 +145,8 @@ Arguments:
 
 			dir := getLocalDir(gitUrl)
 
+			fmt.Fprintf(os.Stderr, "Getting to '%s'\n", dir)
+
 			err = defaultCmdContext.doGet(gitUrl, branchOrCommit, dir, pristine, false)
 			if err != nil {
 				cmd.PrintErrln(err)
@@ -213,46 +173,86 @@ type cmdContext struct {
 }
 
 func (c *cmdContext) doGet(gitUrl *url.URL, branchOrCommit, dir string, pristine bool, quiet bool) error {
-
 	if dirExists(dir) {
 		// validate
 		// color.Cyan(` + cd "%s"`, dir)
 
 		if pristine {
-			remoteOriginUrl := mustExec(dir, `git config --get remote.origin.url`)
+			remoteOriginUrl, err := doExec(dir, `git config --get remote.origin.url`)
+			if err != nil {
+				return err
+			}
 			if remoteOriginUrl != gitUrl.String() {
-				c.mustEchoEvalf(dir, `git remote set-url origin %s`, gitUrl.String())
+				err := c.echoEvalf(dir, `git remote set-url origin %s`, gitUrl.String())
+				if err != nil {
+					return err
+				}
 			}
 		}
 
-		c.mustEchoEvalf(dir, `git fetch`)
-
-		if pristine {
-			if branchOrCommit == "latest" {
-				branchOrCommit = mustExec(dir, `git symbolic-ref --short refs/remotes/origin/HEAD`)
-			} else {
-				branchOrCommit = fmt.Sprintf("origin/%s", branchOrCommit)
-			}
+		err := c.echoEvalf(dir, `git fetch`)
+		if err != nil {
+			return err
 		}
 
-		if isGitDirty(dir) {
+		if branchOrCommit == "" {
+			defaultBranch, err := doExec(dir, `git symbolic-ref --short refs/remotes/origin/HEAD`)
+			if err != nil {
+				return err
+			}
+			defaultBranch = strings.TrimPrefix(defaultBranch, "origin/")
+
+			branchOrCommit = defaultBranch
+		}
+
+		gitStatusPorcelain, err := doExec(dir, "git status --porcelain")
+		if err != nil {
+			return err
+		}
+		isGitDirty := gitStatusPorcelain != ""
+		if isGitDirty {
 			if pristine {
-				c.mustEchoEval(dir, `git stash -u`)
+				err = c.echoEval(dir, `git stash -u`)
+				if err != nil {
+					return err
+				}
 			} else {
-				return errors.New("Git directory is dirty, please stash changes first")
+				return fmt.Errorf("%s: git directory is dirty, please stash changes first or use --pristine", dir)
 			}
 		}
 
-		c.mustEchoEvalf(dir, `git checkout %s`, branchOrCommit)
+		_, err = doExec(dir, "git symbolic-ref HEAD")
+		isABranch := err == nil
 
-		localHead := mustExec(dir, `git rev-parse HEAD`)
-		remoteHead := mustExec(dir, `git rev-parse @{u}`)
-		if localHead != remoteHead {
-			c.mustEchoEvalf(dir, `git merge --ff-only @{u}`)
+		if isABranch {
+			err = c.echoEvalf(dir, `git checkout %s`, branchOrCommit)
+			if err != nil {
+				return err
+			}
+
+			localHead, err := doExec(dir, `git rev-parse HEAD`)
+			if err != nil {
+				return err
+			}
+			remoteHead, _ := doExec(dir, `git rev-parse @{u}`)
+
+			needsFastForward := (localHead != remoteHead) && isABranch
+
+			if needsFastForward {
+				err = c.echoEvalf(dir, `git merge --ff-only @{u}`)
+				if err != nil {
+					return err
+				}
+			}
+		} else {
+			return fmt.Errorf("%s: git directory is in detached head state, please checkout a branch first", dir)
 		}
 
 		if pristine {
-			c.mustEchoEval(dir, `git clean -ffdx`)
+			err = c.echoEval(dir, `git clean -ffdx`)
+			if err != nil {
+				return err
+			}
 		}
 	} else {
 
@@ -260,9 +260,15 @@ func (c *cmdContext) doGet(gitUrl *url.URL, branchOrCommit, dir string, pristine
 		if quiet {
 			gitCloneArgs = "--recursive --quiet"
 		}
-		c.mustEchoEvalf("", `git clone %s %s %s`, gitCloneArgs, gitUrl, dir)
+		err := c.echoEvalf("", `git clone %s %s %s`, gitCloneArgs, gitUrl, dir)
+		if err != nil {
+			return err
+		}
 		if branchOrCommit != "" {
-			c.mustEchoEvalf(dir, `git checkout %s`, branchOrCommit)
+			err = c.echoEvalf(dir, `git checkout %s`, branchOrCommit)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
