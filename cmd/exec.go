@@ -8,13 +8,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var doOneAtATimeMutex = sync.Mutex{}
+
+func doOneAtATime(f func()) {
+	doOneAtATimeMutex.Lock()
+	defer doOneAtATimeMutex.Unlock()
+	f()
+}
+
 func doExecCmd(path string, theCmd string) {
 	cmd := newShellCmd(theCmd)
 	cmd.Dir = path
 	out, err := cmd.CombinedOutput()
 	outStr := strings.TrimSpace(string(out))
 
-	do(func() {
+	doOneAtATime(func() {
 		if len(outStr) > 0 || err != nil {
 			exitCode := cmd.ProcessState.ExitCode()
 			fmt.Printf("in %s: exit status %d\n", path, exitCode)

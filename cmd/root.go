@@ -9,25 +9,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var doMutex = sync.Mutex{}
-
-func do(f func()) {
-	doMutex.Lock()
-	defer doMutex.Unlock()
-	f()
-}
-
 func getWorkspaceDir() string {
-	baseDirFromEnv := os.Getenv("GRIT_WORKSPACE")
-	if baseDirFromEnv != "" {
-		return baseDirFromEnv
-	}
+	return sync.OnceValue(func() string {
+		baseDirFromEnv := os.Getenv("GRIT_WORKSPACE")
+		if baseDirFromEnv != "" {
+			return baseDirFromEnv
+		}
 
-	homedir, err := osUserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-	return filepath.Join(homedir, "Developer", "src")
+		homedir, err := osUserHomeDir()
+		if err != nil {
+			panic(err)
+		}
+		return filepath.Join(homedir, "Developer", "src")
+	})()
 }
 
 var rootCmd = &cobra.Command{

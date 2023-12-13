@@ -77,14 +77,6 @@ func newShellCmd(shCmd string) *exec.Cmd {
 	return exec.Command("sh", "-c", shCmd)
 }
 
-// func mustDoExec(dir string, shCmd string) string {
-// 	out, err := c.doExec(shCmd)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	return out
-// }
-
 func (c *cmdContext) doExec(shCmd string) (string, error) {
 	cmd := newShellCmd(shCmd)
 	cmd.Dir = c.Dir

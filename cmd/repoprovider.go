@@ -164,7 +164,6 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, cloneUrl
 	}
 
 	for {
-		// Get the first page with projects.
 		ps, resp, err := client.Groups.ListGroupProjects(org, opt)
 		if err != nil {
 			return err
@@ -173,12 +172,10 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, cloneUrl
 			cloneUrlFunc(p.HTTPURLToRepo)
 		}
 
-		// Exit the loop when we've seen all pages.
 		if resp.NextPage == 0 {
 			break
 		}
 
-		// Update the page number to get the next page.
 		opt.Page = resp.NextPage
 	}
 
