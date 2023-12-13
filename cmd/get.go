@@ -78,19 +78,19 @@ func newShellCmd(shCmd string) *exec.Cmd {
 }
 
 // func mustDoExec(dir string, shCmd string) string {
-// 	out, err := doExec(dir, shCmd)
+// 	out, err := c.doExec(shCmd)
 // 	if err != nil {
 // 		panic(err)
 // 	}
 // 	return out
 // }
 
-func doExec(dir string, shCmd string) (string, error) {
+func (c *cmdContext) doExec(shCmd string) (string, error) {
 	cmd := newShellCmd(shCmd)
-	cmd.Dir = dir
+	cmd.Dir = c.Dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		err = fmt.Errorf("error executing '%s' in directory '%s': %w", shCmd, dir, err)
+		err = fmt.Errorf("error executing '%s' in directory '%s': %w", shCmd, c.Dir, err)
 	}
 	return strings.TrimSpace(string(out)), err
 }
@@ -103,19 +103,19 @@ func dirExists(dir string) bool {
 	return info.IsDir()
 }
 
-func (c *cmdContext) echoEvalf(dir, shCmd string, a ...any) error {
-	return c.echoEval(dir, fmt.Sprintf(shCmd, a...))
+func (c *cmdContext) echoEvalf(shCmd string, a ...any) error {
+	return c.echoEval(fmt.Sprintf(shCmd, a...))
 }
 
-func (c *cmdContext) echoEval(dir, shCmd string) error {
-	c.EchoFunc(" + %s", shCmd)
+func (c *cmdContext) echoEval(shCmd string) error {
+	c.CmdEchoFunc(shCmd, c.Dir)
 	cmd := newShellCmd(shCmd)
-	cmd.Dir = dir
+	cmd.Dir = c.Dir
 	cmd.Stdout = c.Stdout
 	cmd.Stderr = c.Stderr
 	err := cmd.Run()
 	if err != nil {
-		return fmt.Errorf("error executing '%s' in directory '%s': %w", shCmd, dir, err)
+		return fmt.Errorf("error executing '%s' in directory '%s': %w", shCmd, c.Dir, err)
 	}
 	return nil
 }
@@ -147,7 +147,7 @@ Arguments:
 
 			fmt.Fprintf(os.Stderr, "Getting to '%s'\n", dir)
 
-			err = defaultCmdContext.doGet(gitUrl, branchOrCommit, dir, pristine, false)
+			err = defaultCmdContext.doGet(gitUrl, branchOrCommit, pristine, false)
 			if err != nil {
 				cmd.PrintErrln(err)
 				os.Exit(1)
@@ -161,44 +161,42 @@ Arguments:
 }
 
 var defaultCmdContext = &cmdContext{
-	Stdout:   os.Stdout,
-	Stderr:   os.Stderr,
-	EchoFunc: color.Cyan,
+	Stdout:      os.Stdout,
+	Stderr:      os.Stderr,
+	CmdEchoFunc: func(cmd, dir string) { color.Cyan(" + %s", cmd) },
 }
 
 type cmdContext struct {
-	Stdout   io.Writer
-	Stderr   io.Writer
-	EchoFunc func(format string, a ...interface{})
+	Dir         string
+	Stdout      io.Writer
+	Stderr      io.Writer
+	CmdEchoFunc func(cmd, dir string)
 }
 
-func (c *cmdContext) doGet(gitUrl *url.URL, branchOrCommit, dir string, pristine bool, quiet bool) error {
-	if dirExists(dir) {
-		// validate
-		// color.Cyan(` + cd "%s"`, dir)
-
+func (c *cmdContext) doGet(gitUrl *url.URL, branchOrCommit string, pristine bool, quiet bool) error {
+	if dirExists(c.Dir) {
 		if pristine {
-			remoteOriginUrl, err := doExec(dir, `git config --get remote.origin.url`)
+			remoteOriginUrl, err := c.doExec(`git config --get remote.origin.url`)
 			if err != nil {
 				return err
 			}
 			if remoteOriginUrl != gitUrl.String() {
-				err := c.echoEvalf(dir, `git remote set-url origin %s`, gitUrl.String())
+				err := c.echoEvalf(`git remote set-url origin %s`, gitUrl.String())
 				if err != nil {
 					return err
 				}
 			}
 		}
 
-		err := c.echoEvalf(dir, `git fetch`)
+		err := c.echoEvalf(`git fetch`)
 		if err != nil {
 			return err
 		}
 
 		if branchOrCommit == "" {
-			defaultBranch, err := doExec(dir, `git symbolic-ref --short refs/remotes/origin/HEAD`)
+			defaultBranch, err := c.doExec(`git symbolic-ref --short refs/remotes/origin/HEAD`)
 			if err != nil {
-				logOut, err2 := doExec(dir, `git log -n 1`)
+				logOut, err2 := c.doExec(`git log -n 1`)
 				if err2 != nil && strings.Contains(logOut, "does not have any commits yet") {
 					return nil // nothing we can do on a repo without commits
 				}
@@ -209,66 +207,67 @@ func (c *cmdContext) doGet(gitUrl *url.URL, branchOrCommit, dir string, pristine
 			branchOrCommit = defaultBranch
 		}
 
-		gitStatusPorcelain, err := doExec(dir, "git status --porcelain")
+		gitStatusPorcelain, err := c.doExec("git status --porcelain")
 		if err != nil {
 			return err
 		}
 		isGitDirty := gitStatusPorcelain != ""
 		if isGitDirty {
 			if pristine {
-				err = c.echoEval(dir, `git stash -u`)
+				err = c.echoEval(`git stash -u`)
 				if err != nil {
 					return err
 				}
 			} else {
-				return fmt.Errorf("%s: git directory is dirty, please stash changes first or use --pristine", dir)
+				return fmt.Errorf("%s: git directory is dirty, please stash changes first or use --pristine", c.Dir)
 			}
 		}
 
-		_, err = doExec(dir, "git symbolic-ref HEAD")
+		_, err = c.doExec("git symbolic-ref HEAD")
 		isABranch := err == nil
 
 		if isABranch {
-			err = c.echoEvalf(dir, `git checkout %s`, branchOrCommit)
+			err = c.echoEvalf(`git checkout %s`, branchOrCommit)
 			if err != nil {
 				return err
 			}
 
-			localHead, err := doExec(dir, `git rev-parse HEAD`)
+			localHead, err := c.doExec(`git rev-parse HEAD`)
 			if err != nil {
 				return err
 			}
-			remoteHead, _ := doExec(dir, `git rev-parse @{u}`)
+			remoteHead, _ := c.doExec(`git rev-parse @{u}`)
 
 			needsFastForward := (localHead != remoteHead) && isABranch
 
 			if needsFastForward {
-				err = c.echoEvalf(dir, `git merge --ff-only @{u}`)
+				err = c.echoEvalf(`git merge --ff-only @{u}`)
 				if err != nil {
 					return err
 				}
 			}
 		} else {
-			return fmt.Errorf("%s: git directory is in detached head state, please checkout a branch first", dir)
+			return fmt.Errorf("%s: git directory is in detached head state, please checkout a branch first", c.Dir)
 		}
 
 		if pristine {
-			err = c.echoEval(dir, `git clean -ffdx`)
+			err = c.echoEval(`git clean -ffdx`)
 			if err != nil {
 				return err
 			}
 		}
 	} else {
+		c.Dir = ""
 		gitCloneArgs := "--recursive"
 		if quiet {
 			gitCloneArgs = "--recursive --quiet"
 		}
-		err := c.echoEvalf("", `git clone %s %s %s`, gitCloneArgs, gitUrl, dir)
+		err := c.echoEvalf(`git clone %s %s %s`, gitCloneArgs, gitUrl, c.Dir)
 		if err != nil {
 			return err
 		}
 		if branchOrCommit != "" {
-			err = c.echoEvalf(dir, `git checkout %s`, branchOrCommit)
+			err = c.echoEvalf(`git checkout %s`, branchOrCommit)
 			if err != nil {
 				return err
 			}

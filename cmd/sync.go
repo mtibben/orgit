@@ -1,15 +1,11 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 
-	"github.com/egymgmbh/go-prefix-writer/prefixer"
-	"github.com/fatih/color"
 	"github.com/sourcegraph/conc/pool"
 	"github.com/spf13/cobra"
 )
@@ -58,7 +54,7 @@ func doSync(ctx context.Context, orgUrlStr string, pristine bool, progress strin
 	localDir := getLocalDir(orgUrl)
 	fmt.Fprintf(os.Stderr, "Syncing to '%s'\n", localDir)
 
-	workerPool := NewSyncReposWorkerPool(pristine, progress)
+	workerPool := NewSyncReposWorkerPool(pristine, NewProgressWriter(progress))
 
 	err = provider.ListRepos(ctx, org, workerPool.GoCloneUrl)
 	if err != nil {
@@ -74,23 +70,21 @@ func doSync(ctx context.Context, orgUrlStr string, pristine bool, progress strin
 
 type syncReposWorkerPool struct {
 	errorPool      *pool.ErrorPool
-	progressWriter *ProgressWriter
+	progressWriter ProgressWriter
 	pristine       bool
-	progressType   string
 }
 
-func NewSyncReposWorkerPool(pristine bool, progressType string) *syncReposWorkerPool {
+func NewSyncReposWorkerPool(pristine bool, progressWriter ProgressWriter) *syncReposWorkerPool {
 	wp := syncReposWorkerPool{
 		pristine:       pristine,
 		errorPool:      pool.New().WithErrors(),
-		progressType:   progressType,
-		progressWriter: NewProgressWriter(progressType == "auto"),
+		progressWriter: progressWriter,
 	}
 	return &wp
 }
 
 func (p *syncReposWorkerPool) GoCloneUrl(cloneUrlStr string) {
-	p.progressWriter.AddTotal(1)
+	p.progressWriter.EventAddTotal(1)
 	p.errorPool.Go(func() error {
 		return p.doWork(cloneUrlStr)
 	})
@@ -99,45 +93,26 @@ func (p *syncReposWorkerPool) GoCloneUrl(cloneUrlStr string) {
 func (p *syncReposWorkerPool) Wait() error {
 	err := p.errorPool.Wait()
 	if err == nil {
-		p.progressWriter.Done()
+		p.progressWriter.EventDone()
 	}
 	return err
-}
-
-func (p *syncReposWorkerPool) GetCmdContext(localDir string) cmdContext {
-	relDir, _ := filepath.Rel(getWorkspaceDir(), localDir)
-
-	if p.progressType == "plain" {
-		prefixWriter := prefixer.New(os.Stdout, func() string {
-			return color.GreenString("[%s] ", relDir)
-		})
-
-		return cmdContext{
-			Stdout:   prefixWriter,
-			Stderr:   prefixWriter,
-			EchoFunc: color.Cyan,
-		}
-	} else {
-		return cmdContext{
-			Stdout:   &bytes.Buffer{},
-			Stderr:   &bytes.Buffer{},
-			EchoFunc: func(format string, a ...interface{}) {},
-		}
-	}
 }
 
 func (p *syncReposWorkerPool) doWork(cloneUrlStr string) error {
 	gitUrl, _ := url.Parse(cloneUrlStr)
 	localDir := getLocalDir(gitUrl)
-	c := p.GetCmdContext(localDir)
-
-	err := c.doGet(gitUrl, "", localDir, p.pristine, false)
+	c := cmdContext{
+		Stdout:      p.progressWriter.WriterFor(localDir),
+		Stderr:      p.progressWriter.WriterFor(localDir),
+		CmdEchoFunc: p.progressWriter.EventExecCmd,
+		Dir:         localDir,
+	}
+	err := c.doGet(gitUrl, "", p.pristine, false)
 	if err != nil {
 		return err
 	}
 
-	p.progressWriter.Println("Synced " + localDir)
-	p.progressWriter.AddComplete(1)
+	p.progressWriter.EventSyncedRepo(localDir)
 
 	return nil
 }

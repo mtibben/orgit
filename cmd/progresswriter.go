@@ -1,45 +1,87 @@
 package cmd
 
 import (
+	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"github.com/99designs/grit/syncprinter"
+	"github.com/egymgmbh/go-prefix-writer/prefixer"
+	"github.com/fatih/color"
 )
 
 const ansiSaveCursorPosition = "\033[s"
 const ansiClearLine = "\033[u\033[K"
 
-type ProgressWriter struct {
-	enabled  bool
+type ProgressWriter interface {
+	EventSyncedRepo(localdir string)
+	EventAddTotal(n uint32)
+	EventExecCmd(cmd, dir string)
+	EventDone()
+	WriterFor(localDir string) io.Writer
+}
+
+type PlainProgressWriter struct {
+}
+
+func (p *PlainProgressWriter) EventSyncedRepo(string) {}
+func (p *PlainProgressWriter) EventAddTotal(n uint32) {}
+func (p *PlainProgressWriter) EventDone()             {}
+func (p *PlainProgressWriter) Println(s string)       {}
+
+func (p *PlainProgressWriter) prefix(localDir string) string {
+	relDir, _ := filepath.Rel(getWorkspaceDir(), localDir)
+	return color.HiBlackString("%s ", relDir)
+}
+
+func (p *PlainProgressWriter) EventExecCmd(cmd, dir string) {
+	w := p.WriterFor(dir)
+	fmt.Fprintln(w, color.CyanString("+ %s", cmd))
+}
+
+func (p *PlainProgressWriter) WriterFor(localDir string) io.Writer {
+	return prefixer.New(os.Stderr, func() string {
+		return p.prefix(localDir)
+	})
+}
+
+func NewProgressWriter(progresstype string) ProgressWriter {
+	if progresstype == "plain" {
+		return &PlainProgressWriter{}
+	} else {
+		return &MultiProgressWriter{
+			printer: syncprinter.NewPrinter(os.Stderr),
+		}
+	}
+}
+
+type MultiProgressWriter struct {
 	complete atomic.Uint32
 	total    atomic.Uint32
 	printer  *syncprinter.Printer
 	printed  bool
 }
 
-func (p *ProgressWriter) AddTotal(n uint32) {
+func (p *MultiProgressWriter) EventAddTotal(n uint32) {
 	p.total.Add(n)
 	p.PrintProgress()
 }
 
-func (p *ProgressWriter) AddComplete(n uint32) {
-	p.complete.Add(n)
+func (p *MultiProgressWriter) EventSyncedRepo(localDir string) {
+	p.complete.Add(1)
+	p.printer.Print(ansiClearLine + "Synced " + localDir + "\n" + ansiSaveCursorPosition)
 	p.PrintProgress()
 }
 
-func NewProgressWriter(enabled bool) *ProgressWriter {
-	return &ProgressWriter{
-		printer: syncprinter.NewPrinter(os.Stderr),
-		enabled: enabled,
-	}
+func (p *MultiProgressWriter) EventDone() {
+	p.printer.Println("\nDone")
 }
 
-func (p *ProgressWriter) PrintProgress() {
-	if !p.enabled {
-		return
-	}
+func (p *MultiProgressWriter) EventExecCmd(cmd, dir string) {}
 
+func (p *MultiProgressWriter) PrintProgress() {
 	total := p.total.Load()
 	if total > 0 {
 		firstChar := ansiClearLine
@@ -51,19 +93,6 @@ func (p *ProgressWriter) PrintProgress() {
 	}
 }
 
-func (p *ProgressWriter) Println(s string) {
-	if !p.enabled {
-		return
-	}
-
-	p.printer.Print(ansiClearLine + s + "\n" + ansiSaveCursorPosition)
-	p.PrintProgress()
-}
-
-func (p *ProgressWriter) Done() {
-	if !p.enabled {
-		return
-	}
-
-	p.printer.Println("\nDone")
+func (p *MultiProgressWriter) WriterFor(_ string) io.Writer {
+	return io.Discard
 }
