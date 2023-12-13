@@ -16,24 +16,17 @@ const ansiSaveCursorPosition = "\033[s"
 const ansiClearLine = "\033[u\033[K"
 
 type ProgressLogger struct {
-	// stats
-
-	total    atomic.Uint32
-	complete atomic.Uint32
-	errors   atomic.Uint32
-
-	// state
-
-	progressLineRunning bool
-
-	// config
-
 	Printer             *syncprinter.Printer
 	WriterFor           func(localDir string) io.Writer
 	LogSyncedRepo       bool
 	LogExecCmd          bool
 	LogRealtimeProgress bool
 	LogInfo             bool
+
+	statsTotal               atomic.Uint32
+	statsComplete            atomic.Uint32
+	statsErrors              atomic.Uint32
+	stateProgressLineRunning bool
 }
 
 func NewProgressLogger(logLevel string) *ProgressLogger {
@@ -85,16 +78,16 @@ func (p *ProgressLogger) EventExecCmd(cmd, dir string) {
 }
 
 func (p *ProgressLogger) AddTotalToProgress(n uint32) {
-	p.total.Add(n)
+	p.statsTotal.Add(n)
 	p.PrintProgressLine()
 }
 
 func (p *ProgressLogger) EventSyncedRepoError(localDir string) {
-	p.errors.Add(1)
+	p.statsErrors.Add(1)
 }
 
 func (p *ProgressLogger) EventSyncedRepo(localDir string) {
-	p.complete.Add(1)
+	p.statsComplete.Add(1)
 	if p.LogSyncedRepo {
 		p.Printer.Printf("%sSynced %s\n%s", ansiClearLine, localDir, ansiSaveCursorPosition)
 	}
@@ -104,24 +97,24 @@ func (p *ProgressLogger) EventSyncedRepo(localDir string) {
 func (p *ProgressLogger) Info(s string) {
 	if p.LogInfo {
 		prefix := ""
-		if p.LogRealtimeProgress && p.progressLineRunning {
+		if p.LogRealtimeProgress && p.stateProgressLineRunning {
 			prefix = "\n"
 		}
 		p.Printer.Printf("%s%s\n", prefix, s)
-		p.progressLineRunning = false
+		p.stateProgressLineRunning = false
 	}
 }
 
 func (p *ProgressLogger) PrintProgressLine() {
 	if p.LogRealtimeProgress {
-		total := p.total.Load()
+		total := p.statsTotal.Load()
 		if total > 0 {
 			firstChar := ansiClearLine
-			if !p.progressLineRunning {
+			if !p.stateProgressLineRunning {
 				firstChar = ansiSaveCursorPosition
 			}
-			p.progressLineRunning = true
-			p.Printer.Printf("%sSyncing repos... %d/%d%s", firstChar, p.complete.Load(), total, numErrorsStr(p.errors.Load()))
+			p.stateProgressLineRunning = true
+			p.Printer.Printf("%sSyncing repos... %d/%d%s", firstChar, p.statsComplete.Load(), total, numErrorsStr(p.statsErrors.Load()))
 		}
 	}
 }
