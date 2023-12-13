@@ -3,9 +3,11 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/google/go-github/v57/github"
@@ -17,7 +19,17 @@ const pageSize = 40
 
 var KnownGitProviders = []RepoProvider{
 	NewGithubRepoProvider(),
-	NewGitlabRepoProvider(),
+}
+
+func init() {
+	glabHosts := strings.Split(os.Getenv("GITLAB_HOSTS"), ",")
+	glabHosts = append(glabHosts, "gitlab.com")
+	slices.Sort(glabHosts)
+	slices.Compact(glabHosts)
+
+	for _, host := range glabHosts {
+		KnownGitProviders = append(KnownGitProviders, NewGitlabRepoProvider(host))
+	}
 }
 
 type RepoProvider interface {
@@ -132,21 +144,23 @@ func getNetrcPasswordForMachine(machine string) string {
 
 type GitlabRepoProvider struct {
 	genericRepoProvider
+	host string
 }
 
-func NewGitlabRepoProvider() GitlabRepoProvider {
+func NewGitlabRepoProvider(host string) GitlabRepoProvider {
 	return GitlabRepoProvider{
-		genericRepoProvider{
-			prefix:       "gitlab.com/",
+		genericRepoProvider: genericRepoProvider{
+			prefix:       fmt.Sprintf("%s/", host),
 			appendPrefix: "https://",
 			appendSuffix: ".git",
-			orgRegexp:    regexp.MustCompile("(https?://)?gitlab.com/(?P<org>.+)"),
+			orgRegexp:    regexp.MustCompile(fmt.Sprintf("(https?://)?%s/(?P<org>.+)", host)),
 		},
+		host: host,
 	}
 }
 
 func (gl GitlabRepoProvider) getClient(ctx context.Context) (*gitlab.Client, error) {
-	gitlabToken := getNetrcPasswordForMachine("gitlab.com")
+	gitlabToken := getNetrcPasswordForMachine(gl.host)
 	return gitlab.NewClient(gitlabToken)
 }
 

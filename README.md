@@ -13,6 +13,8 @@
 
 `grit` organises your git repositories in your workspace directory in a tree structure that mirrors the URL structure of the remote git repository.
 
+For example, if you have a git repository with the URL github.com/my-org/my-repo, then `grit` will clone it into `$GRIT_WORKSPACE/github.com/my-org/my-repo`.
+
 - `grit get` - clones a git repository
 - `grit sync` - synchronises and updates all git repositories in the workspace
 - `grit list` - lists all git repositories in the workspace
@@ -35,9 +37,9 @@ export GRIT_WORKSPACE=~/Developer/src          # Set the current directory as th
                                                # that mirrors the URL structure remote git repositories.
 grit get github.com/<ORG-NAME>/<PROJECT-NAME>  # Clone a repo from GitHub or Gitlab using the project URL. The repo will be cloned
                                                #   into $GRIT_WORKSPACE/github.com/<ORG-NAME>/<PROJECT-NAME>
-grit get -r github.com/<ORG-NAME>                # Clone all remote repos from a GitHub or Gitlab org in parallel.
+grit get -r github.com/<ORG-NAME>              # Clone all remote repos from a GitHub or Gitlab org in parallel.
 grit sync --archive github.com/<ORG-NAME>      #   --archive:    Move local repos that are not found remotely to `$GRIT_WORKSPACE/.archive/`
-grit sync --pristine                           #   --pristine:   Restore local repos to pristine state with stash, reset, clean
+grit sync --pristine github.com/<ORG-NAME>     #   --pristine:   Restore local repos to pristine state with stash, reset, clean
 grit get --pristine --except-for my-repo       #   --except-for: Except for repos that match the 'my-repo' glob
 grit list                                      # List all local repos in the workspace
 grit status                                    # Show the status of all local repos that have changes
@@ -46,10 +48,11 @@ grit status                                    # Show the status of all local re
 ## Configuration
 
 - `GRIT_WORKSPACE` can be set to a directory
+- `GITLAB_HOSTS` can be set to a comma separated list of custom Gitlab hosts
 
 ### Authentication using `.netrc`
 
-In order to use the `sync` command, you'll need to use the Github or Gitlab API. You can set up authentication for GitHub and Gitlab using your `.netrc` file.
+In order to use the `grit sync` command, you'll need to use the Github or Gitlab API. You can set up authentication for GitHub and Gitlab using your `.netrc` file.
 
 For example:
 ```
