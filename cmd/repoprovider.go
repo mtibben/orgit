@@ -15,7 +15,7 @@ import (
 	gitlab "github.com/xanzy/go-gitlab"
 )
 
-const pageSize = 40
+const apiPageSize = 100
 
 var KnownGitProviders = []RepoProvider{
 	NewGithubRepoProvider(),
@@ -104,7 +104,7 @@ func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, repoUrlC
 	client := gh.getClient(ctx)
 	opt := &github.RepositoryListByOrgOptions{
 		ListOptions: github.ListOptions{
-			PerPage: pageSize,
+			PerPage: apiPageSize,
 		},
 	}
 	for {
@@ -172,7 +172,7 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, cloneUrl
 
 	opt := &gitlab.ListGroupProjectsOptions{
 		ListOptions: gitlab.ListOptions{
-			PerPage: pageSize,
+			PerPage: apiPageSize,
 			Page:    1,
 		},
 		Archived:         gitlab.Ptr(false),

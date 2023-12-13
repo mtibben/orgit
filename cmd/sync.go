@@ -12,7 +12,7 @@ import (
 
 func init() {
 	pristine := false
-	progress := "auto"
+	logLevel := "auto"
 
 	var cmdSync = &cobra.Command{
 		Use:   "sync [flags] ORG_URL",
@@ -20,7 +20,7 @@ func init() {
 		Short: `Clone or pull a collection of repos from GitHub or Gitlab in parallel`,
 		Run: func(cmd *cobra.Command, args []string) {
 			orgUrlArg := args[0]
-			err := doSync(cmd.Context(), orgUrlArg, pristine, progress)
+			err := doSync(cmd.Context(), orgUrlArg, pristine, logLevel)
 			if err != nil {
 				cmd.PrintErrln(err)
 				os.Exit(1)
@@ -29,12 +29,12 @@ func init() {
 	}
 
 	cmdSync.Flags().BoolVar(&pristine, "pristine", false, "Stash, reset and clean the repo first")
-	cmdSync.Flags().StringVar(&progress, "progress", "auto", "Set type of progress output (auto, tty, plain)")
+	cmdSync.Flags().StringVar(&logLevel, "log-level", "info", "Set the log level (debug, verbose, info, quiet)")
 
 	rootCmd.AddCommand(cmdSync)
 }
 
-func doSync(ctx context.Context, orgUrlStr string, pristine bool, progress string) error {
+func doSync(ctx context.Context, orgUrlStr string, pristine bool, loglevel string) error {
 	org := ""
 	provider, err := RepoProviderFor(orgUrlStr)
 	if err != nil {
@@ -52,9 +52,10 @@ func doSync(ctx context.Context, orgUrlStr string, pristine bool, progress strin
 	}
 
 	localDir := getLocalDir(orgUrl)
-	fmt.Fprintf(os.Stderr, "Syncing to '%s'\n", localDir)
+	logger := NewProgressLogger(loglevel)
+	logger.Info(fmt.Sprintf("Syncing to '%s'", localDir))
 
-	workerPool := NewSyncReposWorkerPool(pristine, NewProgressWriter(progress))
+	workerPool := NewSyncReposWorkerPool(pristine, logger)
 
 	err = provider.ListRepos(ctx, org, workerPool.GoCloneUrl)
 	if err != nil {
@@ -70,11 +71,11 @@ func doSync(ctx context.Context, orgUrlStr string, pristine bool, progress strin
 
 type syncReposWorkerPool struct {
 	errorPool      *pool.ErrorPool
-	progressWriter ProgressWriter
+	progressWriter *ProgressLogger
 	pristine       bool
 }
 
-func NewSyncReposWorkerPool(pristine bool, progressWriter ProgressWriter) *syncReposWorkerPool {
+func NewSyncReposWorkerPool(pristine bool, progressWriter *ProgressLogger) *syncReposWorkerPool {
 	wp := syncReposWorkerPool{
 		pristine:       pristine,
 		errorPool:      pool.New().WithErrors(),
@@ -84,7 +85,7 @@ func NewSyncReposWorkerPool(pristine bool, progressWriter ProgressWriter) *syncR
 }
 
 func (p *syncReposWorkerPool) GoCloneUrl(cloneUrlStr string) {
-	p.progressWriter.EventAddTotal(1)
+	p.progressWriter.AddTotalToProgress(1)
 	p.errorPool.Go(func() error {
 		return p.doWork(cloneUrlStr)
 	})
@@ -93,7 +94,9 @@ func (p *syncReposWorkerPool) GoCloneUrl(cloneUrlStr string) {
 func (p *syncReposWorkerPool) Wait() error {
 	err := p.errorPool.Wait()
 	if err == nil {
-		p.progressWriter.EventDone()
+		p.progressWriter.Info("Done")
+	} else {
+		p.progressWriter.Info("Done with errors")
 	}
 	return err
 }
@@ -109,6 +112,7 @@ func (p *syncReposWorkerPool) doWork(cloneUrlStr string) error {
 	}
 	err := c.doGet(gitUrl, "", p.pristine, false)
 	if err != nil {
+		p.progressWriter.EventSyncedRepoError(localDir)
 		return err
 	}
 
