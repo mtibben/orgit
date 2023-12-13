@@ -101,7 +101,7 @@ func (p *syncReposWorkerPool) Wait() error {
 func (p *syncReposWorkerPool) doWork(cloneUrlStr string) error {
 	gitUrl, _ := url.Parse(cloneUrlStr)
 	localDir := getLocalDir(gitUrl)
-	c := cmdContext{
+	c := getCmdContext{
 		Stdout:      p.progressWriter.WriterFor(localDir),
 		Stderr:      p.progressWriter.WriterFor(localDir),
 		CmdEchoFunc: p.progressWriter.EventExecCmd,

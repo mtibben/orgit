@@ -77,7 +77,7 @@ func newShellCmd(shCmd string) *exec.Cmd {
 	return exec.Command("sh", "-c", shCmd)
 }
 
-func (c *cmdContext) doExec(shCmd string) (string, error) {
+func (c *getCmdContext) doExec(shCmd string) (string, error) {
 	cmd := newShellCmd(shCmd)
 	cmd.Dir = c.Dir
 	out, err := cmd.CombinedOutput()
@@ -95,11 +95,11 @@ func dirExists(dir string) bool {
 	return info.IsDir()
 }
 
-func (c *cmdContext) echoEvalf(shCmd string, a ...any) error {
+func (c *getCmdContext) echoEvalf(shCmd string, a ...any) error {
 	return c.echoEval(fmt.Sprintf(shCmd, a...))
 }
 
-func (c *cmdContext) echoEval(shCmd string) error {
+func (c *getCmdContext) echoEval(shCmd string) error {
 	c.CmdEchoFunc(shCmd, c.Dir)
 	cmd := newShellCmd(shCmd)
 	cmd.Dir = c.Dir
@@ -115,7 +115,7 @@ func (c *cmdContext) echoEval(shCmd string) error {
 func init() {
 	var pristine bool
 
-	var cmdCheckout = &cobra.Command{
+	var cmdGet = &cobra.Command{
 		Use:   "get [flags] PROJECT_URL[@COMMIT]",
 		Short: "Clone or checkout a Git repository into the workspace directory",
 		Long: `Clone or checkout a Git repository into the workspace directory.
@@ -136,10 +136,19 @@ Arguments:
 			}
 
 			dir := getLocalDir(gitUrl)
+			quiet := false
 
-			fmt.Fprintf(os.Stderr, "Getting to '%s'\n", dir)
+			if !quiet {
+				fmt.Fprintf(os.Stderr, "In '%s'\n", dir)
+			}
 
-			err = defaultCmdContext.doGet(gitUrl, branchOrCommit, pristine, false)
+			getCmdContext := &getCmdContext{
+				Stdout:      os.Stdout,
+				Stderr:      os.Stderr,
+				CmdEchoFunc: func(cmd, dir string) { color.Cyan(" + %s", cmd) },
+				Dir:         dir,
+			}
+			err = getCmdContext.doGet(gitUrl, branchOrCommit, pristine, quiet)
 			if err != nil {
 				cmd.PrintErrln(err)
 				os.Exit(1)
@@ -147,25 +156,19 @@ Arguments:
 		},
 	}
 
-	cmdCheckout.Flags().BoolVar(&pristine, "pristine", false, "Stash, reset and clean the repo first")
+	cmdGet.Flags().BoolVar(&pristine, "pristine", false, "Stash, reset and clean the repo first")
 
-	rootCmd.AddCommand(cmdCheckout)
+	rootCmd.AddCommand(cmdGet)
 }
 
-var defaultCmdContext = &cmdContext{
-	Stdout:      os.Stdout,
-	Stderr:      os.Stderr,
-	CmdEchoFunc: func(cmd, dir string) { color.Cyan(" + %s", cmd) },
-}
-
-type cmdContext struct {
+type getCmdContext struct {
 	Dir         string
 	Stdout      io.Writer
 	Stderr      io.Writer
 	CmdEchoFunc func(cmd, dir string)
 }
 
-func (c *cmdContext) doGet(gitUrl *url.URL, branchOrCommit string, pristine bool, quiet bool) error {
+func (c *getCmdContext) doGet(gitUrl *url.URL, branchOrCommit string, pristine bool, quiet bool) error {
 	if dirExists(c.Dir) {
 		if pristine {
 			remoteOriginUrl, err := c.doExec(`git config --get remote.origin.url`)
@@ -249,12 +252,13 @@ func (c *cmdContext) doGet(gitUrl *url.URL, branchOrCommit string, pristine bool
 			}
 		}
 	} else {
+		destinationDir := c.Dir
 		c.Dir = ""
 		gitCloneArgs := "--recursive"
 		if quiet {
 			gitCloneArgs = "--recursive --quiet"
 		}
-		err := c.echoEvalf(`git clone %s %s %s`, gitCloneArgs, gitUrl, c.Dir)
+		err := c.echoEvalf(`git clone %s %s %s`, gitCloneArgs, gitUrl, destinationDir)
 		if err != nil {
 			return err
 		}
