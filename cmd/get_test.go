@@ -11,13 +11,10 @@ func TestGetArgs(t *testing.T) {
 		expectedCommitOrBranch string
 		expectedDir            string
 		expectedError          error
-		mockCwd                string
 	}{
-		{"github.com/user/project@commit", "ssh://github.com/user/project", "commit", "/path/to/dir", nil, ""},
-		{"gitlab.com/user/project@commit", "ssh://gitlab.com/user/project", "commit", "/home/user/Developer/src/gitlab.com/user/project", nil, ""},
-		{"project", "https://gitlab.com/vistaprint-org/project.git", "", "/home/user/Developer/src/gitlab.com/vistaprint-org/project", nil, "/home/user/Developer/src/gitlab.com/vistaprint-org"},
-		{"project@commit", "https://gitlab.com/vistaprint-org/project.git", "commit", "/home/user/Developer/src/gitlab.com/vistaprint-org/project", nil, ""},
-		{"/project@commit", "https://gitlab.com/project.git", "commit", "/home/user/Developer/src/gitlab.com/project", nil, ""},
+		{"github.com/user/project@commit", "https://github.com/user/project.git", "commit", "/home/user/gitorg/github.com/user/project", nil},
+		{"github.com/user/project", "https://github.com/user/project.git", "", "/home/user/gitorg/github.com/user/project", nil},
+		{"github.com/org/group/project", "https://github.com/org/group/project.git", "", "/home/user/gitorg/github.com/org/group/project", nil},
 	}
 
 	for i, tt := range tableTests {

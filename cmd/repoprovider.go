@@ -98,6 +98,49 @@ func (gh GithubRepoProvider) getClient(ctx context.Context) *github.Client {
 
 func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, repoUrlCallback func(remoteRepo)) error {
 	client := gh.getClient(ctx)
+	_, _, err := client.Organizations.Get(ctx, org)
+	if err == nil {
+		return gh.ListReposByOrg(ctx, org, includeArchived, repoUrlCallback)
+	}
+
+	return gh.ListReposByUser(ctx, org, includeArchived, repoUrlCallback)
+}
+
+func (gh GithubRepoProvider) ListReposByUser(ctx context.Context, org string, includeArchived bool, repoUrlCallback func(remoteRepo)) error {
+	client := gh.getClient(ctx)
+	opt := &github.RepositoryListByUserOptions{
+		ListOptions: github.ListOptions{
+			PerPage: apiPageSize,
+		},
+	}
+	for {
+		repos, resp, err := client.Repositories.ListByUser(ctx, org, opt)
+		if err != nil {
+			return err
+		}
+
+		for _, repo := range repos {
+			if repo.GetArchived() && !includeArchived {
+				continue
+			}
+			r := remoteRepo{
+				cloneUrl:   repo.GetCloneURL(),
+				isArchived: repo.GetArchived(),
+			}
+			repoUrlCallback(r)
+		}
+
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+
+	return nil
+}
+
+func (gh GithubRepoProvider) ListReposByOrg(ctx context.Context, org string, includeArchived bool, repoUrlCallback func(remoteRepo)) error {
+	client := gh.getClient(ctx)
 	opt := &github.RepositoryListByOrgOptions{
 		ListOptions: github.ListOptions{
 			PerPage: apiPageSize,
