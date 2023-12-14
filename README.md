@@ -4,24 +4,24 @@
 
 ## Why use `gitorg`?
 
-`gitorg` is useful if you need to manage a large number of git repositories. It's especially useful if you have a lot of git repositories that are organised in a tree structure, like you find in Gitlab Groups.
+`gitorg` is useful if you need to manage a large number of git repositories. It's especially useful if you have a lot of git repositories that are organised in a tree structure, like you find in GitLab Groups.
 
 `gitorg` differs from other similar tools in that it:
   * uses sensible defaults, so you can use it immediately without any special setup or config
   * relies on the git CLI for all git operations, so all config that applies to git is respected
   * uses concurrency wherever possible, so it's fast
-  * supports nested trees of git repositories, so it supports Gitlab Groups
+  * supports nested trees of git repositories, so it supports GitLab Groups
   * has a small, focussed feature-set, so it's easy to understand and use
 
-This makes `gitorg` a single, simple replacement for `git clone`, `ghorg` and `ghq`.
+This makes `gitorg` a single-tool replacement for `git clone`, `ghorg` and `ghq`.
 
 ## How it works
 
 `gitorg` organises your git repositories in your workspace directory in a tree structure that mirrors the URL structure of the remote git repository. For example, if you have a git repository with the URL github.com/my-org/my-repo, then `gitorg` will clone it into `$GITORG_WORKSPACE/github.com/my-org/my-repo`.
 
 There are three commands.
-- `gitorg get PROJECT_URL` will clone a single git repository.
-- `gitorg sync ORG_URL` will recursively clone all git repositories in a GitHub organisation or Gitlab group.
+- `gitorg get REPO_URL` will clone a single git repository using the repo's web URL.
+- `gitorg sync ORG_URL` will recursively clone and update all git repositories from GitHub or GitLab using the org, user or group URL.
 - `gitorg list` will list all git repositories in the workspace.
 
 ## Example use
@@ -37,11 +37,11 @@ gitorg list                               # List all local repos in the workspac
 ## Configuration
 
 - `GITORG_WORKSPACE` can be set to a directory where you want to store your git repositories. By default it will use ~/gitorg
-- `GITLAB_HOSTS` can be set to a comma separated list of custom Gitlab hosts
+- `GITLAB_HOSTS` can be set to a comma separated list of custom GitLab hosts
 
 ### Authentication
 
-In order to use the `gitorg sync` command, you'll need to use the Github or Gitlab API. You can set up authentication for GitHub and Gitlab using your `.netrc` file.
+In order to use the `gitorg sync` command, you'll need to use the GitHub or GitLab API. You can set up authentication for GitHub and GitLab using your `.netrc` file.
 
 For example:
 ```
@@ -69,13 +69,14 @@ You can install autocompletion in your shell by running `gitorg completion`. Thi
 
 
 ## TODO: wanted features
- - status
- - "tidy" - find directories not part of remote
+ - --status
+ - --tidy: - find directories not part of remote
  - graceful shutdown - "index.lock exists Another git process seems to be running in this repository"
- - Oauth2 authentication
- - except-for repos - ignorefile?
+ - oauth2 authentication
+ - --except-for or ignorefile
  - `@latest` = the tag with the highest semver version
  - don't include skipped updates in stats
+ - Ctrl-C during sync should display errors. Or just print errors in realtime
 
 ## Prior art and inspiration
  - https://gerrit.googlesource.com/git-repo
