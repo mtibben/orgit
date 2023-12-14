@@ -11,7 +11,7 @@ import (
 
 func getWorkspaceDir() string {
 	return sync.OnceValue(func() string {
-		baseDirFromEnv := os.Getenv("GRIT_WORKSPACE")
+		baseDirFromEnv := os.Getenv("GITORG_WORKSPACE")
 		if baseDirFromEnv != "" {
 			return baseDirFromEnv
 		}
@@ -20,13 +20,13 @@ func getWorkspaceDir() string {
 		if err != nil {
 			panic(err)
 		}
-		return filepath.Join(homedir, "Developer", "src")
+		return filepath.Join(homedir, "gitorg")
 	})()
 }
 
 var rootCmd = &cobra.Command{
 	Use:   "gitorg",
-	Short: "Grit is a tool for organising git repositories",
+	Short: "Gitorg is a tool for organising git repositories",
 }
 
 func Execute() {

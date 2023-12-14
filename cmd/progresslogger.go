@@ -29,6 +29,8 @@ type ProgressLogger struct {
 	statsErrors              atomic.Int32
 	statsArchived            atomic.Int32
 	stateProgressLineRunning bool
+
+	doneMsg string
 }
 
 func NewProgressLogger(logLevel string) *ProgressLogger {
@@ -120,6 +122,12 @@ func (p *ProgressLogger) EventClonedRepo(localDir string) {
 	p.PrintProgressLine()
 }
 
+func (p *ProgressLogger) EndProgressLine(doneMsg string) {
+	p.doneMsg = fmt.Sprintf(" %s\n", doneMsg)
+	p.PrintProgressLine()
+	p.stateProgressLineRunning = false
+}
+
 func (p *ProgressLogger) Info(s string) {
 	if p.LogInfo {
 		prefix := ""
@@ -127,7 +135,6 @@ func (p *ProgressLogger) Info(s string) {
 			prefix = "\n"
 		}
 		p.Printer.Printf("%s%s\n", prefix, s)
-		p.stateProgressLineRunning = false
 	}
 }
 
@@ -140,7 +147,7 @@ func (p *ProgressLogger) PrintProgressLine() {
 				firstChar = ansiSaveCursorPosition
 			}
 			p.stateProgressLineRunning = true
-			p.Printer.Printf("%sSyncing repos... %d/%d%s", firstChar, p.statsComplete.Load(), total, p.statsStr())
+			p.Printer.Printf("%sSyncing repos... %d/%d%s%s", firstChar, p.statsComplete.Load(), total, p.statsStr(), p.doneMsg)
 		}
 	}
 }

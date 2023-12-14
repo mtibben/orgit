@@ -7,38 +7,39 @@
 `gitorg` is useful if you need to manage a large number of git repositories. It's especially useful if you have a lot of git repositories that are organised in a tree structure, like you find in Gitlab Groups.
 
 `gitorg` differs from other similar tools in that it:
-  * uses minimal config, so you can use it immediately without any special setup
-  * relies on the git CLI for all git operations, so all config and that applies to git is respected
+  * uses sensible defaults, so you can use it immediately without any special setup or config
+  * relies on the git CLI for all git operations, so all config that applies to git is respected
   * uses concurrency wherever possible, so it's fast
   * supports nested trees of git repositories, so it supports Gitlab Groups
   * has a small, focussed feature-set, so it's easy to understand and use
 
+This makes `gitorg` a single, simple replacement for `git clone`, `ghorg` and `ghq`.
+
 ## How it works
 
-`gitorg` organises your git repositories in your workspace directory in a tree structure that mirrors the URL structure of the remote git repository. For example, if you have a git repository with the URL github.com/my-org/my-repo, then `gitorg` will clone it into `$GRIT_WORKSPACE/github.com/my-org/my-repo`.
+`gitorg` organises your git repositories in your workspace directory in a tree structure that mirrors the URL structure of the remote git repository. For example, if you have a git repository with the URL github.com/my-org/my-repo, then `gitorg` will clone it into `$GITORG_WORKSPACE/github.com/my-org/my-repo`.
 
-There are two key commands. `gitorg get` will clone a single git repository.
-And `gitorg sync` will recursively clone all git repositories in a GitHub organisation or Gitlab group.
+There are three commands.
+- `gitorg get PROJECT_URL` will clone a single git repository.
+- `gitorg sync ORG_URL` will recursively clone all git repositories in a GitHub organisation or Gitlab group.
+- `gitorg list` will list all git repositories in the workspace.
 
 ## Example use
 
 ```shell
-export GRIT_WORKSPACE=~/Developer/src          # Set the current directory as the gitorg workspace. The git workspace is a directory
-                                               # that mirrors the URL structure remote git repositories.
-gitorg get github.com/<ORG-NAME>/<PROJECT-NAME>  # Clone a repo from GitHub or Gitlab using the project URL. The repo will be cloned
-                                               #   into $GRIT_WORKSPACE/github.com/<ORG-NAME>/<PROJECT-NAME>
-gitorg sync github.com/<ORG-NAME>                # Clone all remote repos from a GitHub or Gitlab org in parallel.
-gitorg sync --archive github.com/<ORG-NAME>      #   --archive: Move local repos that are not found remotely to `$GRIT_WORKSPACE/.archive/`
-gitorg sync --update github.com/<ORG-NAME>       #   --update: Stash uncommitted changes and switch to origin HEAD
-gitorg list                                      # List all local repos in the workspace
+export GITORG_WORKSPACE=~/Developer/src   # Set the gitorg workspace. The git workspace is a directory that mirrors
+                                          # the remote git repository's URL structure.
+gitorg get github.com/my-org/my-project   # Clone a repo into $GITORG_WORKSPACE/github.com/my-org/my-project
+gitorg sync github.com/my-org             # Clone all remote repos from the remote org in parallel
+gitorg list                               # List all local repos in the workspace
 ```
 
 ## Configuration
 
-- `GRIT_WORKSPACE` can be set to a directory
+- `GITORG_WORKSPACE` can be set to a directory where you want to store your git repositories. By default it will use ~/gitorg
 - `GITLAB_HOSTS` can be set to a comma separated list of custom Gitlab hosts
 
-### Authentication using `.netrc`
+### Authentication
 
 In order to use the `gitorg sync` command, you'll need to use the Github or Gitlab API. You can set up authentication for GitHub and Gitlab using your `.netrc` file.
 
@@ -57,27 +58,31 @@ machine gitlab.com
   password <YOUR-GITLAB-PERSONAL-ACCESS-TOKEN>
 ```
 
-## More tips
- - `@latest` = the tag with the highest semver version
- - A useful alias for changing directory to a repo using `fzf`
-    ```
-    alias gitorgcd="cd \$(gitorg list --full-path | fzf) && pwd"
-    ```
+## Tips
 
-## Wanted features
+A useful shell alias for changing directory to a repo using `fzf`
+```shell
+alias gcd="cd \$(gitorg list --full-path | fzf) && pwd"
+```
+
+You can install autocompletion in your shell by running `gitorg completion`. This will install a completion script for bash, zsh, fish, and powershell.
+
+
+## TODO: wanted features
  - status
  - "tidy" - find directories not part of remote
- - graceful shutdown - index.lock exists Another git process seems to be running in this repository
+ - graceful shutdown - "index.lock exists Another git process seems to be running in this repository"
  - Oauth2 authentication
  - except-for repos - ignorefile?
+ - `@latest` = the tag with the highest semver version
+ - don't include skipped updates in stats
 
-## Prior art
+## Prior art and inspiration
  - https://gerrit.googlesource.com/git-repo
  - https://github.com/gabrie30/ghorg
+ - https://github.com/x-motemen/ghq
  - https://gitslave.sourceforge.net/
  - https://github.com/orf/git-workspace
  - https://luke_titley.gitlab.io/git-poly/
  - https://github.com/grdl/git-get
  - https://github.com/fboender/multi-git-status
- - https://github.com/x-motemen/ghq
-

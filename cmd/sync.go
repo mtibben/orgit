@@ -20,31 +20,38 @@ func init() {
 	var cmdSync = &cobra.Command{
 		Use:   "sync [flags] ORG_URL",
 		Args:  cobra.ExactArgs(1),
-		Short: `Clone or pull a collection of repos from GitHub or Gitlab in parallel`,
-		Long: `syncing will:
-1. clone a collection of repos from GitHub or Gitlab in parallel
-2. update existing repos to origin HEAD by stashing uncommitted changes and pulling
-3. archive repos that have been archived on the remote by moving them to $GRIT_WORKSPACE/.archive
+		Short: `Clone or pull all repos from a GitHub or Gitlab org`,
+		Long: `Syncing will:
+ 1. clone all repositories from a GitHub org or Gitlab org/group
+ 2. update existing repos by stashing uncommitted changes and pulling origin HEAD
+ 3. archive repos that have been archived remotely by moving them to $GITORG_WORKSPACE/.archive
 `,
 		Run: func(cmd *cobra.Command, args []string) {
 			orgUrlArg := args[0]
-			err := doSync(cmd.Context(), orgUrlArg, !noArchive, !noUpdate, !noClone, logLevel)
+			err := doSync(cmd.Context(), orgUrlArg, !noClone, !noUpdate, !noArchive, logLevel)
 			if err != nil {
-				cmd.PrintErrln(err)
+				fmt.Println(err)
 				os.Exit(1)
 			}
+		},
+		ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			if len(args) != 0 {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			workspace := getWorkspaceDir()
+			return []string{workspace}, cobra.ShellCompDirectiveFilterDirs
 		},
 	}
 
 	cmdSync.Flags().BoolVar(&noClone, "no-clone", false, "Don't clone repos")
-	cmdSync.Flags().BoolVar(&noArchive, "no-archive", false, "Don't archive repos")
 	cmdSync.Flags().BoolVar(&noUpdate, "no-update", false, "Don't update repos")
+	cmdSync.Flags().BoolVar(&noArchive, "no-archive", false, "Don't archive repos")
 	cmdSync.Flags().StringVar(&logLevel, "log-level", "info", "Set the log level (debug, verbose, info, quiet)")
 
 	rootCmd.AddCommand(cmdSync)
 }
 
-func doSync(ctx context.Context, orgUrlStr string, archive, update, clone bool, loglevel string) error {
+func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, loglevel string) error {
 	org := ""
 	provider, err := RepoProviderFor(orgUrlStr)
 	if err != nil {
@@ -65,7 +72,7 @@ func doSync(ctx context.Context, orgUrlStr string, archive, update, clone bool, 
 	logger := NewProgressLogger(loglevel)
 	logger.Info(fmt.Sprintf("Syncing to '%s'", localDir))
 
-	workerPool := NewSyncReposWorkerPool(archive, update, clone, logger)
+	workerPool := NewSyncReposWorkerPool(clone, update, archive, logger)
 
 	err = provider.ListRepos(ctx, org, archive, workerPool.GoGetUrl)
 	if err != nil {
@@ -82,17 +89,17 @@ func doSync(ctx context.Context, orgUrlStr string, archive, update, clone bool, 
 type syncReposWorkerPool struct {
 	errorPool      *pool.ErrorPool
 	progressWriter *ProgressLogger
-	archiveRepos   bool
-	updateRepos    bool
 	cloneRepos     bool
+	updateRepos    bool
+	archiveRepos   bool
 }
 
-func NewSyncReposWorkerPool(archiveRepos, updateRepos, cloneRepos bool, progressWriter *ProgressLogger) *syncReposWorkerPool {
+func NewSyncReposWorkerPool(clone, update, archive bool, progressWriter *ProgressLogger) *syncReposWorkerPool {
 	wp := syncReposWorkerPool{
 		errorPool:      pool.New().WithErrors(),
-		archiveRepos:   archiveRepos,
-		updateRepos:    updateRepos,
-		cloneRepos:     cloneRepos,
+		cloneRepos:     clone,
+		updateRepos:    update,
+		archiveRepos:   archive,
 		progressWriter: progressWriter,
 	}
 	return &wp
@@ -113,9 +120,9 @@ func (p *syncReposWorkerPool) GoGetUrl(r remoteRepo) {
 func (p *syncReposWorkerPool) Wait() error {
 	err := p.errorPool.Wait()
 	if err == nil {
-		p.progressWriter.Info("Done")
+		p.progressWriter.EndProgressLine("done")
 	} else {
-		p.progressWriter.Info("Done with errors")
+		p.progressWriter.EndProgressLine("done with errors")
 	}
 	return err
 }
