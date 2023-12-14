@@ -1,4 +1,4 @@
-module github.com/99designs/grit
+module github.com/99designs/gitorg
 
 go 1.21.4
 

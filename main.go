@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/99designs/grit/cmd"
+	"github.com/99designs/gitorg/cmd"
 )
 
 func main() {

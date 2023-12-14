@@ -25,7 +25,7 @@ func getWorkspaceDir() string {
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "grit",
+	Use:   "gitorg",
 	Short: "Grit is a tool for organising git repositories",
 }
 

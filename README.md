@@ -1,36 +1,36 @@
-# grit
+# gitorg
 
-`grit` is a tool for cloning and organising git repositories. It's like `go get` for git.
+`gitorg` is a tool for cloning and organising git repositories. It's like `go get` for git.
 
-## Why use `grit`?
+## Why use `gitorg`?
 
-`grit` is useful if you need to manage a large number of git repositories. It's especially useful if you have a lot of git repositories that are organised in a tree structure, like you find in Gitlab Groups.
+`gitorg` is useful if you need to manage a large number of git repositories. It's especially useful if you have a lot of git repositories that are organised in a tree structure, like you find in Gitlab Groups.
 
-`grit` differs from other similar tools in that it:
+`gitorg` differs from other similar tools in that it:
   * uses minimal config, so you can use it immediately without any special setup
-  * relies on the git CLI for all git operations, so all config that applies to git is respected
+  * relies on the git CLI for all git operations, so all config and that applies to git is respected
   * uses concurrency wherever possible, so it's fast
   * supports nested trees of git repositories, so it supports Gitlab Groups
   * has a small, focussed feature-set, so it's easy to understand and use
 
 ## How it works
 
-`grit` organises your git repositories in your workspace directory in a tree structure that mirrors the URL structure of the remote git repository. For example, if you have a git repository with the URL github.com/my-org/my-repo, then `grit` will clone it into `$GRIT_WORKSPACE/github.com/my-org/my-repo`.
+`gitorg` organises your git repositories in your workspace directory in a tree structure that mirrors the URL structure of the remote git repository. For example, if you have a git repository with the URL github.com/my-org/my-repo, then `gitorg` will clone it into `$GRIT_WORKSPACE/github.com/my-org/my-repo`.
 
-There are two key commands. `grit get` will clone a single git repository.
-And `grit sync` will recursively clone all git repositories in a GitHub organisation or Gitlab group.
+There are two key commands. `gitorg get` will clone a single git repository.
+And `gitorg sync` will recursively clone all git repositories in a GitHub organisation or Gitlab group.
 
 ## Example use
 
 ```shell
-export GRIT_WORKSPACE=~/Developer/src          # Set the current directory as the grit workspace. The git workspace is a directory
+export GRIT_WORKSPACE=~/Developer/src          # Set the current directory as the gitorg workspace. The git workspace is a directory
                                                # that mirrors the URL structure remote git repositories.
-grit get github.com/<ORG-NAME>/<PROJECT-NAME>  # Clone a repo from GitHub or Gitlab using the project URL. The repo will be cloned
+gitorg get github.com/<ORG-NAME>/<PROJECT-NAME>  # Clone a repo from GitHub or Gitlab using the project URL. The repo will be cloned
                                                #   into $GRIT_WORKSPACE/github.com/<ORG-NAME>/<PROJECT-NAME>
-grit sync github.com/<ORG-NAME>                # Clone all remote repos from a GitHub or Gitlab org in parallel.
-grit sync --archive github.com/<ORG-NAME>      #   --archive: Move local repos that are not found remotely to `$GRIT_WORKSPACE/.archive/`
-grit sync --update github.com/<ORG-NAME>       #   --update: Stash uncommitted changes and switch to origin HEAD
-grit list                                      # List all local repos in the workspace
+gitorg sync github.com/<ORG-NAME>                # Clone all remote repos from a GitHub or Gitlab org in parallel.
+gitorg sync --archive github.com/<ORG-NAME>      #   --archive: Move local repos that are not found remotely to `$GRIT_WORKSPACE/.archive/`
+gitorg sync --update github.com/<ORG-NAME>       #   --update: Stash uncommitted changes and switch to origin HEAD
+gitorg list                                      # List all local repos in the workspace
 ```
 
 ## Configuration
@@ -40,7 +40,7 @@ grit list                                      # List all local repos in the wor
 
 ### Authentication using `.netrc`
 
-In order to use the `grit sync` command, you'll need to use the Github or Gitlab API. You can set up authentication for GitHub and Gitlab using your `.netrc` file.
+In order to use the `gitorg sync` command, you'll need to use the Github or Gitlab API. You can set up authentication for GitHub and Gitlab using your `.netrc` file.
 
 For example:
 ```
@@ -61,7 +61,7 @@ machine gitlab.com
  - `@latest` = the tag with the highest semver version
  - A useful alias for changing directory to a repo using `fzf`
     ```
-    alias gritcd="cd \$(grit list --full-path | fzf) && pwd"
+    alias gitorgcd="cd \$(gitorg list --full-path | fzf) && pwd"
     ```
 
 ## Wanted features

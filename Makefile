@@ -1,2 +1,2 @@
 install:
-	go build -o ~/bin/grit .
+	go build -o ~/bin/gitorg .

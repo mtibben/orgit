@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/99designs/grit/syncprinter"
+	"github.com/99designs/gitorg/syncprinter"
 	"github.com/egymgmbh/go-prefix-writer/prefixer"
 	"github.com/fatih/color"
 )
