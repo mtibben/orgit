@@ -4,10 +4,10 @@
 
 ## Why use `grit`?
 
-`grit` is useful if you need to manage a lot of git repositories. It's especially useful if you have a lot of git repositories that are organised in a tree structure, like you find in Gitlab Groups.
+`grit` is useful if you need to manage a large number of git repositories. It's especially useful if you have a lot of git repositories that are organised in a tree structure, like you find in Gitlab Groups.
 
 `grit` differs from other similar tools in that it:
-  * uses minimal config, so you can use it immediately without any setup
+  * uses minimal config, so you can use it immediately without any special setup
   * relies on the git CLI for all git operations, so all config that applies to git is respected
   * uses concurrency wherever possible, so it's fast
   * supports nested trees of git repositories, so it supports Gitlab Groups
@@ -27,12 +27,10 @@ export GRIT_WORKSPACE=~/Developer/src          # Set the current directory as th
                                                # that mirrors the URL structure remote git repositories.
 grit get github.com/<ORG-NAME>/<PROJECT-NAME>  # Clone a repo from GitHub or Gitlab using the project URL. The repo will be cloned
                                                #   into $GRIT_WORKSPACE/github.com/<ORG-NAME>/<PROJECT-NAME>
-grit sync github.com/<ORG-NAME>              # Clone all remote repos from a GitHub or Gitlab org in parallel.
-grit sync --archive github.com/<ORG-NAME>      #   --archive:    Move local repos that are not found remotely to `$GRIT_WORKSPACE/.archive/`
-grit sync --pristine github.com/<ORG-NAME>     #   --pristine:   Restore local repos to pristine state with stash, reset, clean
-grit get --pristine --except-for my-repo       #   --except-for: Except for repos that match the 'my-repo' glob
+grit sync github.com/<ORG-NAME>                # Clone all remote repos from a GitHub or Gitlab org in parallel.
+grit sync --archive github.com/<ORG-NAME>      #   --archive: Move local repos that are not found remotely to `$GRIT_WORKSPACE/.archive/`
+grit sync --update github.com/<ORG-NAME>       #   --update: Stash uncommitted changes and switch to origin HEAD
 grit list                                      # List all local repos in the workspace
-grit list --status                             # Show the status of all local repos that have changes
 ```
 
 ## Configuration
@@ -65,6 +63,13 @@ machine gitlab.com
     ```
     alias gritcd="cd \$(grit list --full-path | fzf) && pwd"
     ```
+
+## Wanted features
+ - status
+ - "tidy" - find directories not part of remote
+ - graceful shutdown - index.lock exists Another git process seems to be running in this repository
+ - Oauth2 authentication
+ - except-for repos - ignorefile?
 
 ## Prior art
  - https://gerrit.googlesource.com/git-repo

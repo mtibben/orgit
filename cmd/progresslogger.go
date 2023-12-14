@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"github.com/99designs/grit/syncprinter"
@@ -23,9 +24,10 @@ type ProgressLogger struct {
 	LogRealtimeProgress bool
 	LogInfo             bool
 
-	statsTotal               atomic.Uint32
-	statsComplete            atomic.Uint32
-	statsErrors              atomic.Uint32
+	statsTotal               atomic.Int32
+	statsComplete            atomic.Int32
+	statsErrors              atomic.Int32
+	statsArchived            atomic.Int32
 	stateProgressLineRunning bool
 }
 
@@ -77,8 +79,16 @@ func (p *ProgressLogger) EventExecCmd(cmd, dir string) {
 	}
 }
 
-func (p *ProgressLogger) AddTotalToProgress(n uint32) {
+func (p *ProgressLogger) AddTotalToProgress(n int32) {
 	p.statsTotal.Add(n)
+	p.PrintProgressLine()
+}
+
+func (p *ProgressLogger) EventArchivedRepo(localDir string) {
+	p.statsArchived.Add(1)
+	if p.LogSyncedRepo {
+		p.Printer.Printf("%sarchived %s\n%s", ansiClearLine, localDir, ansiSaveCursorPosition)
+	}
 	p.PrintProgressLine()
 }
 
@@ -86,10 +96,26 @@ func (p *ProgressLogger) EventSyncedRepoError(localDir string) {
 	p.statsErrors.Add(1)
 }
 
-func (p *ProgressLogger) EventSyncedRepo(localDir string) {
+func (p *ProgressLogger) EventUpdatedRepo(localDir string) {
 	p.statsComplete.Add(1)
 	if p.LogSyncedRepo {
-		p.Printer.Printf("%sSynced %s\n%s", ansiClearLine, localDir, ansiSaveCursorPosition)
+		p.Printer.Printf("%supdated %s\n%s", ansiClearLine, localDir, ansiSaveCursorPosition)
+	}
+	p.PrintProgressLine()
+}
+
+func (p *ProgressLogger) EventSkippedRepo(localDir string) {
+	p.statsComplete.Add(1)
+	if p.LogSyncedRepo {
+		p.Printer.Printf("%sskipped %s\n%s", ansiClearLine, localDir, ansiSaveCursorPosition)
+	}
+	p.PrintProgressLine()
+}
+
+func (p *ProgressLogger) EventClonedRepo(localDir string) {
+	p.statsComplete.Add(1)
+	if p.LogSyncedRepo {
+		p.Printer.Printf("%scloned %s\n%s", ansiClearLine, localDir, ansiSaveCursorPosition)
 	}
 	p.PrintProgressLine()
 }
@@ -114,16 +140,27 @@ func (p *ProgressLogger) PrintProgressLine() {
 				firstChar = ansiSaveCursorPosition
 			}
 			p.stateProgressLineRunning = true
-			p.Printer.Printf("%sSyncing repos... %d/%d%s", firstChar, p.statsComplete.Load(), total, numErrorsStr(p.statsErrors.Load()))
+			p.Printer.Printf("%sSyncing repos... %d/%d%s", firstChar, p.statsComplete.Load(), total, p.statsStr())
 		}
 	}
 }
 
-func numErrorsStr(numErrors uint32) string {
+func (p *ProgressLogger) statsStr() string {
+	numErrors := p.statsErrors.Load()
+	numArchived := p.statsArchived.Load()
+
+	stats := []string{}
+	if numArchived >= 1 {
+		stats = append(stats, fmt.Sprintf("%d archived", numArchived))
+	}
 	if numErrors == 1 {
-		return " (1 error)"
+		stats = append(stats, "1 error")
 	} else if numErrors > 1 {
-		return fmt.Sprintf(" (%d errors)", numErrors)
+		stats = append(stats, fmt.Sprintf("%d errors", numErrors))
+	}
+
+	if len(stats) > 0 {
+		return fmt.Sprintf(" (%s)", strings.Join(stats, ", "))
 	}
 	return ""
 }

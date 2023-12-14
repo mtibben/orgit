@@ -79,10 +79,10 @@ func newShellCmd(shCmd string) *exec.Cmd {
 
 func (c *getCmdContext) doExec(shCmd string) (string, error) {
 	cmd := newShellCmd(shCmd)
-	cmd.Dir = c.Dir
+	cmd.Dir = c.WorkingDir
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		err = fmt.Errorf("error executing '%s' in directory '%s': %w", shCmd, c.Dir, err)
+		err = fmt.Errorf("error executing '%s' in directory '%s': %w", shCmd, c.WorkingDir, err)
 	}
 	return strings.TrimSpace(string(out)), err
 }
@@ -100,20 +100,20 @@ func (c *getCmdContext) echoEvalf(shCmd string, a ...any) error {
 }
 
 func (c *getCmdContext) echoEval(shCmd string) error {
-	c.CmdEchoFunc(shCmd, c.Dir)
+	c.CmdEchoFunc(shCmd, c.WorkingDir)
 	cmd := newShellCmd(shCmd)
-	cmd.Dir = c.Dir
+	cmd.Dir = c.WorkingDir
 	cmd.Stdout = c.Stdout
 	cmd.Stderr = c.Stderr
 	err := cmd.Run()
 	if err != nil {
-		return fmt.Errorf("error executing '%s' in directory '%s': %w", shCmd, c.Dir, err)
+		return fmt.Errorf("error executing '%s' in directory '%s': %w", shCmd, c.WorkingDir, err)
 	}
 	return nil
 }
 
 func init() {
-	var pristine bool
+	var update bool
 
 	var cmdGet = &cobra.Command{
 		Use:   "get [flags] PROJECT_URL[@COMMIT]",
@@ -136,19 +136,14 @@ Arguments:
 			}
 
 			dir := getLocalDir(gitUrl)
-			quiet := false
-
-			if !quiet {
-				fmt.Fprintf(os.Stderr, "In '%s'\n", dir)
-			}
 
 			getCmdContext := &getCmdContext{
 				Stdout:      os.Stdout,
 				Stderr:      os.Stderr,
 				CmdEchoFunc: func(cmd, dir string) { color.Cyan(" + %s", cmd) },
-				Dir:         dir,
+				WorkingDir:  dir,
 			}
-			err = getCmdContext.doGet(gitUrl, branchOrCommit, pristine, quiet)
+			err = getCmdContext.doGet(gitUrl, branchOrCommit, update)
 			if err != nil {
 				cmd.PrintErrln(err)
 				os.Exit(1)
@@ -156,118 +151,141 @@ Arguments:
 		},
 	}
 
-	cmdGet.Flags().BoolVar(&pristine, "pristine", false, "Stash, reset and clean the repo first")
+	cmdGet.Flags().BoolVar(&update, "update", false, "Stash uncommitted changes and switch to origin HEAD")
 
 	rootCmd.AddCommand(cmdGet)
 }
 
 type getCmdContext struct {
-	Dir         string
+	WorkingDir  string
 	Stdout      io.Writer
 	Stderr      io.Writer
 	CmdEchoFunc func(cmd, dir string)
 }
 
-func (c *getCmdContext) doGet(gitUrl *url.URL, branchOrCommit string, pristine bool, quiet bool) error {
-	if dirExists(c.Dir) {
-		if pristine {
-			remoteOriginUrl, err := c.doExec(`git config --get remote.origin.url`)
-			if err != nil {
-				return err
-			}
-			if remoteOriginUrl != gitUrl.String() {
-				err := c.echoEvalf(`git remote set-url origin %s`, gitUrl.String())
-				if err != nil {
-					return err
-				}
-			}
-		}
-
-		err := c.echoEvalf(`git fetch`)
-		if err != nil {
-			return err
-		}
-
-		if branchOrCommit == "" {
-			defaultBranch, err := c.doExec(`git symbolic-ref --short refs/remotes/origin/HEAD`)
-			if err != nil {
-				logOut, err2 := c.doExec(`git log -n 1`)
-				if err2 != nil && strings.Contains(logOut, "does not have any commits yet") {
-					return nil // nothing we can do on a repo without commits
-				}
-				return err
-			}
-			defaultBranch = strings.TrimPrefix(defaultBranch, "origin/")
-
-			branchOrCommit = defaultBranch
-		}
-
-		gitStatusPorcelain, err := c.doExec("git status --porcelain")
-		if err != nil {
-			return err
-		}
-		isGitDirty := gitStatusPorcelain != ""
-		if isGitDirty {
-			if pristine {
-				err = c.echoEval(`git stash -u`)
-				if err != nil {
-					return err
-				}
-			} else {
-				return fmt.Errorf("%s: git directory is dirty, please stash changes first or use --pristine", c.Dir)
-			}
-		}
-
-		_, err = c.doExec("git symbolic-ref HEAD")
-		isABranch := err == nil
-
-		if isABranch {
-			err = c.echoEvalf(`git checkout %s`, branchOrCommit)
-			if err != nil {
-				return err
-			}
-
-			localHead, err := c.doExec(`git rev-parse HEAD`)
-			if err != nil {
-				return err
-			}
-			remoteHead, _ := c.doExec(`git rev-parse @{u}`)
-
-			needsFastForward := (localHead != remoteHead) && isABranch
-
-			if needsFastForward {
-				err = c.echoEvalf(`git merge --ff-only @{u}`)
-				if err != nil {
-					return err
-				}
-			}
-		} else {
-			return fmt.Errorf("%s: git directory is in detached head state, please checkout a branch first", c.Dir)
-		}
-
-		if pristine {
-			err = c.echoEval(`git clean -ffdx`)
+func (c *getCmdContext) doGet(gitUrl *url.URL, branchOrCommit string, update bool) error {
+	if dirExists(c.WorkingDir) {
+		if update {
+			fmt.Fprintf(os.Stderr, "In '%s'\n", c.WorkingDir)
+			err := c.doUpdate(gitUrl, branchOrCommit)
 			if err != nil {
 				return err
 			}
 		}
+		// FIXME: check if the dir is actually a git repo
 	} else {
-		destinationDir := c.Dir
-		c.Dir = ""
-		gitCloneArgs := "--recursive"
-		if quiet {
-			gitCloneArgs = "--recursive --quiet"
-		}
-		err := c.echoEvalf(`git clone %s %s %s`, gitCloneArgs, gitUrl, destinationDir)
+		err := c.doClone(gitUrl.String(), branchOrCommit)
 		if err != nil {
 			return err
 		}
-		if branchOrCommit != "" {
-			err = c.echoEvalf(`git checkout %s`, branchOrCommit)
-			if err != nil {
-				return err
-			}
+	}
+	return nil
+}
+
+var errNoCommits = fmt.Errorf("no commits")
+
+func (c *getCmdContext) getDefaultBranchName() (string, error) {
+	defaultBranch, err := c.doExec(`git symbolic-ref --short refs/remotes/origin/HEAD`)
+	if err != nil {
+		logOut, err2 := c.doExec(`git log -n 1`)
+		if err2 != nil && strings.Contains(logOut, "does not have any commits yet") {
+			return "", errNoCommits
 		}
+		return "", err
+	}
+	defaultBranch = strings.TrimPrefix(defaultBranch, "origin/")
+
+	return defaultBranch, nil
+}
+
+func (c *getCmdContext) isGitDirty() (bool, error) {
+	gitStatusPorcelain, err := c.doExec("git status --porcelain")
+	if err != nil {
+		return false, err
+	}
+
+	return gitStatusPorcelain != "", nil
+}
+
+func (c *getCmdContext) isDetatched() bool {
+	_, err := c.doExec("git symbolic-ref HEAD")
+	return err != nil
+}
+
+func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
+	remoteOriginUrl, err := c.doExec(`git config --get remote.origin.url`)
+	if err != nil {
+		return err
+	}
+	if remoteOriginUrl != gitUrl.String() {
+		err := c.echoEvalf(`git remote set-url origin %s`, gitUrl.String())
+		if err != nil {
+			return err
+		}
+	}
+
+	err = c.echoEvalf(`git fetch origin`)
+	if err != nil {
+		return err
+	}
+
+	if branchOrCommit == "" {
+		branchOrCommit, err = c.getDefaultBranchName()
+		if err == errNoCommits {
+			return nil // nothing we can do on a repo without commits
+		} else if err != nil {
+			return err
+		}
+	}
+
+	if c.isDetatched() {
+		return fmt.Errorf("can't update '%s', git directory is in detached head state", c.WorkingDir)
+	}
+
+	isGitDirty, err := c.isGitDirty()
+	if err != nil {
+		return err
+	}
+	if isGitDirty {
+		err = c.echoEval(`git stash -u`)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = c.echoEvalf(`git checkout %s`, branchOrCommit)
+	if err != nil {
+		return err
+	}
+
+	localHead, err := c.doExec(`git rev-parse HEAD`)
+	if err != nil {
+		return err
+	}
+	remoteHead, _ := c.doExec(`git rev-parse @{u}`)
+
+	needsFastForward := (localHead != remoteHead)
+	if needsFastForward {
+		err = c.echoEvalf(`git merge --ff-only @{u}`)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *getCmdContext) doClone(gitUrl, branchOrCommit string) error {
+	destinationDir := c.WorkingDir
+	c.WorkingDir = ""
+	gitCloneArgs := "--recursive"
+	if branchOrCommit != "" {
+		gitCloneArgs = fmt.Sprintf("%s --branch %s", gitCloneArgs, branchOrCommit)
+	}
+
+	err := c.echoEvalf(`git clone %s %s %s`, gitCloneArgs, gitUrl, destinationDir)
+	if err != nil {
+		return err
 	}
 
 	return nil

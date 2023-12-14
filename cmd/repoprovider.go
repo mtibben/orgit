@@ -36,7 +36,7 @@ type RepoProvider interface {
 	IsMatch(s string) bool
 	NormaliseGitUrl(s string) string
 	GetOrgFromUrl(orgUrl string) (string, error)
-	ListRepos(ctx context.Context, org string, repoUrlCallback func(string)) error
+	ListRepos(ctx context.Context, org string, includeArchived bool, repoUrlCallback func(remoteRepo)) error
 }
 
 func RepoProviderFor(s string) (RepoProvider, error) {
@@ -71,10 +71,6 @@ func (p genericRepoProvider) GetOrgFromUrl(orgUrlArg string) (string, error) {
 	return p.orgRegexp.FindStringSubmatch(orgUrlArg)[orgIndex], nil
 }
 
-func (p genericRepoProvider) ListRepos(ctx context.Context, org string, repoUrlCallback func(string)) error {
-	return fmt.Errorf("no ListRepos implementation for '%s'", p.prefix)
-}
-
 type GithubRepoProvider struct {
 	genericRepoProvider
 }
@@ -100,7 +96,7 @@ func (gh GithubRepoProvider) getClient(ctx context.Context) *github.Client {
 	return github.NewClient(nil)
 }
 
-func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, repoUrlCallback func(string)) error {
+func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, repoUrlCallback func(remoteRepo)) error {
 	client := gh.getClient(ctx)
 	opt := &github.RepositoryListByOrgOptions{
 		ListOptions: github.ListOptions{
@@ -114,9 +110,14 @@ func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, repoUrlC
 		}
 
 		for _, repo := range repos {
-			if !repo.GetArchived() {
-				repoUrlCallback(repo.GetCloneURL())
+			if repo.GetArchived() && !includeArchived {
+				continue
 			}
+			r := remoteRepo{
+				cloneUrl:   repo.GetCloneURL(),
+				isArchived: repo.GetArchived(),
+			}
+			repoUrlCallback(r)
 		}
 
 		if resp.NextPage == 0 {
@@ -164,7 +165,7 @@ func (gl GitlabRepoProvider) getClient(ctx context.Context) (*gitlab.Client, err
 	return gitlab.NewClient(gitlabToken)
 }
 
-func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, cloneUrlFunc func(string)) error {
+func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, cloneUrlFunc func(remoteRepo)) error {
 	client, err := gl.getClient(ctx)
 	if err != nil {
 		return err
@@ -175,8 +176,8 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, cloneUrl
 			PerPage: apiPageSize,
 			Page:    1,
 		},
-		Archived:         gitlab.Ptr(false),
 		IncludeSubGroups: gitlab.Ptr(true),
+		MinAccessLevel:   gitlab.Ptr(gitlab.DeveloperPermissions),
 	}
 
 	for {
@@ -185,7 +186,15 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, cloneUrl
 			return err
 		}
 		for _, p := range ps {
-			cloneUrlFunc(p.HTTPURLToRepo)
+			if p.Archived && !includeArchived {
+				continue
+			}
+
+			r := remoteRepo{
+				cloneUrl:   p.HTTPURLToRepo,
+				isArchived: p.Archived,
+			}
+			cloneUrlFunc(r)
 		}
 
 		if resp.NextPage == 0 {
