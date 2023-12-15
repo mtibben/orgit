@@ -2,18 +2,20 @@
 
 `gitorg` is a tool for cloning and organising git repositories. It's like `go get` for git.
 
+
 ## Why use `gitorg`?
 
-`gitorg` is useful if you need to manage a large number of git repositories. It's especially useful if you have a lot of git repositories that are organised in a tree structure, like you find in GitLab Groups.
+`gitorg` is useful if you need to manage a large number of git repositories, especially if they are organised in a tree structure, like you find in GitLab Groups.
 
-`gitorg` differs from other similar tools in that it:
-  * uses sensible defaults, so you can use it immediately without any special setup or config
+`gitorg` streamlines cloning repos, organising repos in a consistent stucture, and keeping repos up-to-date.
+
+`gitorg`'s features and goals:
+  * sensible defaults, so you can use it immediately without any special setup or config
   * relies on the git CLI for all git operations, so all config that applies to git is respected
   * uses concurrency wherever possible, so it's fast
   * supports nested trees of git repositories, so it supports GitLab Groups
   * has a small, focussed feature-set, so it's easy to understand and use
 
-This makes `gitorg` a single-tool replacement for `git clone`, `ghorg` and `ghq`.
 
 ## How it works
 
@@ -24,6 +26,11 @@ There are three commands.
 - `gitorg sync ORG_URL` will recursively clone and update all git repositories from GitHub or GitLab using the org, user or group URL.
 - `gitorg list` will list all git repositories in the workspace.
 
+Note that `gitorg` assumes that:
+ - `origin` is the default remote
+ - git uses `https` as the git transport. To use SSH instead, override the URL in your `.gitconfig` (see example below)
+
+
 ## Example use
 
 ```shell
@@ -33,6 +40,7 @@ gitorg get github.com/my-org/my-project   # Clone a repo into $GITORG_WORKSPACE/
 gitorg sync github.com/my-org             # Clone all remote repos from the remote org in parallel
 gitorg list                               # List all local repos in the workspace
 ```
+
 
 ## Configuration
 
@@ -59,6 +67,7 @@ machine gitlab.com
   password <YOUR-GITLAB-PERSONAL-ACCESS-TOKEN>
 ```
 
+
 ## Tips
 
 A useful shell alias for changing directory to a repo using `fzf`
@@ -67,6 +76,14 @@ alias gcd="cd \$(gitorg list --full-path | fzf) && pwd"
 ```
 
 You can install autocompletion in your shell by running `gitorg completion`. This will install a completion script for bash, zsh, fish, and powershell.
+
+If you wish to use SSH transport instead of HTTPS, you can override the URL in your `.gitconfig` file. For example:
+```ini
+[url "git@github.com:"]
+	insteadOf = https://github.com/
+[url "git@gitlab.com:"]
+	insteadOf = https://gitlab.com/
+```
 
 
 ## TODO: wanted features
@@ -78,6 +95,7 @@ You can install autocompletion in your shell by running `gitorg completion`. Thi
  - `@latest` = the tag with the highest semver version
  - don't include skipped updates in stats
  - Ctrl-C during sync should display errors. Or just print errors in realtime
+
 
 ## Prior art and inspiration
  - https://gerrit.googlesource.com/git-repo
