@@ -10,6 +10,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
+}
+
 func getIgnore() *ignore.GitIgnore {
 	i, err := ignore.CompileIgnoreFile(filepath.Join(getWorkspaceDir(), ".gitorgignore"))
 	if err != nil {

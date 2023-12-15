@@ -95,6 +95,10 @@ func dirExists(dir string) bool {
 	return info.IsDir()
 }
 
+func isGitRepo(dir string) bool {
+	return dirExists(filepath.Join(dir, ".git"))
+}
+
 func (c *getCmdContext) echoEvalf(shCmd string, a ...any) error {
 	return c.echoEval(fmt.Sprintf(shCmd, a...))
 }
@@ -116,9 +120,9 @@ func init() {
 	var update bool
 
 	var cmdGet = &cobra.Command{
-		Use:   "get [flags] PROJECT_URL[@COMMIT]",
-		Short: "Clone or checkout a Git repository into the workspace directory",
-		Long: `Clone or checkout a Git repository into the workspace directory.
+		Use:   "get [flags] PROJECT_URL[@COMMIT]...",
+		Short: "Clone or checkout a git repository into the workspace directory",
+		Long: `Clone or checkout a git repository into the workspace directory.
 
 If the worktree has been modified, the changes are stashed.
 
@@ -126,32 +130,33 @@ Arguments:
   PROJECT_URL  URL of the gitlab or github project, or a relative path to a project in the default directory
   COMMIT       The ref name or hash to checkout. Defaults to the remote HEAD.
 `,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MinimumNArgs(1),
 		Run: func(cmd *cobra.Command, args []string) {
+			for _, gitUrlArg := range args {
+				gitUrl, branchOrCommit, err := parseArgsForGetCmd(gitUrlArg)
+				if err != nil {
+					cmd.PrintErrln(err)
+					os.Exit(1)
+				}
 
-			gitUrl, branchOrCommit, err := parseArgsForGetCmd(args[0])
-			if err != nil {
-				cmd.PrintErrln(err)
-				os.Exit(1)
-			}
+				dir := getLocalDir(gitUrl)
 
-			dir := getLocalDir(gitUrl)
-
-			getCmdContext := &getCmdContext{
-				Stdout:      os.Stdout,
-				Stderr:      os.Stderr,
-				CmdEchoFunc: func(cmd, dir string) { color.Cyan(" + %s", cmd) },
-				WorkingDir:  dir,
-			}
-			err = getCmdContext.doGet(gitUrl, branchOrCommit, update)
-			if err != nil {
-				cmd.PrintErrln(err)
-				os.Exit(1)
+				getCmdContext := &getCmdContext{
+					Stdout:      os.Stdout,
+					Stderr:      os.Stderr,
+					CmdEchoFunc: func(cmd, dir string) { color.Cyan(" + %s", cmd) },
+					WorkingDir:  dir,
+				}
+				err = getCmdContext.doGet(gitUrl, branchOrCommit, update)
+				if err != nil {
+					cmd.PrintErrln(err)
+					os.Exit(1)
+				}
 			}
 		},
 	}
 
-	cmdGet.Flags().BoolVar(&update, "update", false, "Stash uncommitted changes and switch to origin HEAD")
+	cmdGet.Flags().BoolVar(&update, "update", false, "Stash uncommitted changes and pull the latest changes from the remote")
 
 	rootCmd.AddCommand(cmdGet)
 }
@@ -165,19 +170,15 @@ type getCmdContext struct {
 
 func (c *getCmdContext) doGet(gitUrl *url.URL, branchOrCommit string, update bool) error {
 	if dirExists(c.WorkingDir) {
+		if !isGitRepo(c.WorkingDir) {
+			return fmt.Errorf("'%s' already exists but is not a git repository", c.WorkingDir)
+		}
 		if update {
 			fmt.Fprintf(os.Stderr, "In '%s'\n", c.WorkingDir)
-			err := c.doUpdate(gitUrl, branchOrCommit)
-			if err != nil {
-				return err
-			}
+			return c.doUpdate(gitUrl, branchOrCommit)
 		}
-		// FIXME: check if the dir is actually a git repo
 	} else {
-		err := c.doClone(gitUrl.String(), branchOrCommit)
-		if err != nil {
-			return err
-		}
+		return c.doClone(gitUrl.String(), branchOrCommit)
 	}
 	return nil
 }
@@ -243,7 +244,15 @@ func (c *getCmdContext) fixRemoteConfig(gitUrl *url.URL) error {
 	return nil
 }
 
+func (c *getCmdContext) isLocked() bool {
+	return fileExists(filepath.Join(c.WorkingDir, ".git", "index.lock"))
+}
+
 func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
+	if c.isLocked() {
+		return fmt.Errorf("can't update '%s', another git process seems to be running in this repository: .git/index.lock exists", c.WorkingDir)
+	}
+
 	err := c.fixRemoteConfig(gitUrl)
 	if err != nil {
 		return err
@@ -268,8 +277,8 @@ func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
 		return fmt.Errorf("can't update '%s', HEAD is detached", c.WorkingDir)
 	}
 
-	// stash any uncommitted changes
-	err = c.echoEval(`git stash -u`)
+	// stash any uncommitted changes opportunistically
+	err = c.echoEvalf(`git stash push --include-untracked --message "gitorg stash while checking out %s"`, branchOrCommit)
 	if err != nil {
 		return err
 	}
@@ -297,6 +306,9 @@ func (c *getCmdContext) doClone(gitUrl, branchOrCommit string) error {
 	if err != nil {
 		return err
 	}
+	if branchOrCommit != "" {
+		return c.echoEvalf(`git checkout %s`, branchOrCommit)
+	}
 
-	return c.echoEvalf(`git checkout %s`, branchOrCommit)
+	return nil
 }
