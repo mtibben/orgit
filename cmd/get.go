@@ -182,45 +182,53 @@ func (c *getCmdContext) doGet(gitUrl *url.URL, branchOrCommit string, update boo
 	return nil
 }
 
+func (c *getCmdContext) findDefaultBranchNameWithSetHead() (string, error) {
+	// or perhaps we need to resync?
+	setHeadResult, err := c.doExec(`git remote set-head origin --auto`)
+	if err != nil {
+		return "", err
+	}
+
+	// regex extract the branch name from the output 'origin/HEAD set to BRANCH'
+	matches := regexp.MustCompile(`origin/HEAD set to (.+)`).FindStringSubmatch(setHeadResult)
+	if len(matches) != 2 {
+		return "", fmt.Errorf("can't find default branch name in output '%s'", setHeadResult)
+	}
+
+	return matches[1], nil
+}
+
 var errNoCommits = fmt.Errorf("no commits")
 
 func (c *getCmdContext) getDefaultBranchName() (string, error) {
-	defaultBranch, err := c.doExec(`git symbolic-ref --short refs/remotes/origin/HEAD`)
-	if err != nil {
+	defaultBranch, err1 := c.doExec(`git symbolic-ref --short refs/remotes/origin/HEAD`)
+	if err1 != nil {
+
+		// can't find origin/HEAD. Perhaps this is a repo without any commits yet?
 		logOut, err2 := c.doExec(`git log -n 1`)
 		if err2 != nil && strings.Contains(logOut, "does not have any commits yet") {
 			return "", errNoCommits
 		}
-		return "", err
+
+		var err3 error
+		defaultBranch, err3 = c.findDefaultBranchNameWithSetHead()
+		if err3 != nil {
+			// can't find default branch name, return the original err1
+			return "", err1
+		}
+	} else {
+		defaultBranch = strings.TrimPrefix(defaultBranch, "origin/")
 	}
-	defaultBranch = strings.TrimPrefix(defaultBranch, "origin/")
 
 	return defaultBranch, nil
 }
 
-func (c *getCmdContext) isGitDirty() (bool, error) {
-	gitStatusPorcelain, err := c.doExec("git status --porcelain")
-	if err != nil {
-		return false, err
-	}
-
-	return strings.TrimSpace(gitStatusPorcelain) != "", nil
-}
-
-func (c *getCmdContext) isDetatched() bool {
-	_, err := c.doExec("git symbolic-ref HEAD")
+func (c *getCmdContext) isDetatched(ref string) bool {
+	_, err := c.doExec("git symbolic-ref " + ref)
 	return err != nil
 }
 
-func (c *getCmdContext) isOnRemoteHeadBranch(branch string) (bool, error) {
-	out, err := c.doExec("git branch -r origin/HEAD --contains " + branch)
-	if err != nil {
-		return false, err
-	}
-	return out != "", nil
-}
-
-func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
+func (c *getCmdContext) fixRemoteConfig(gitUrl *url.URL) error {
 	remoteOriginUrl, err := c.doExec(`git config --get remote.origin.url`)
 	if err != nil {
 		return err
@@ -230,6 +238,15 @@ func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
+	err := c.fixRemoteConfig(gitUrl)
+	if err != nil {
+		return err
 	}
 
 	err = c.echoEvalf(`git fetch origin`)
@@ -246,28 +263,15 @@ func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
 		}
 	}
 
-	// check that branchOrCommit exists on remote, which gives us confidence to hard reset
-	isOnRemoteHeadBranch, err := c.isOnRemoteHeadBranch(branchOrCommit)
-	if err != nil {
-		return err
-	}
-	if !isOnRemoteHeadBranch {
-		return fmt.Errorf("can't update '%s', %s/HEAD doesn't exist on remote", c.WorkingDir, branchOrCommit)
+	// don't want to clobber a git repo in a detached state
+	if c.isDetatched("HEAD") {
+		return fmt.Errorf("can't update '%s', HEAD is detached", c.WorkingDir)
 	}
 
-	if c.isDetatched() {
-		return fmt.Errorf("can't update '%s', git directory is in detached head state", c.WorkingDir)
-	}
-
-	isGitDirty, err := c.isGitDirty()
+	// stash any uncommitted changes
+	err = c.echoEval(`git stash -u`)
 	if err != nil {
 		return err
-	}
-	if isGitDirty {
-		err = c.echoEval(`git stash -u`)
-		if err != nil {
-			return err
-		}
 	}
 
 	err = c.echoEvalf(`git checkout %s`, branchOrCommit)
@@ -275,26 +279,24 @@ func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
 		return err
 	}
 
-	err = c.echoEvalf(`git reset --hard origin/%s`, branchOrCommit)
-	if err != nil {
-		return err
+	isBranch := !c.isDetatched(branchOrCommit)
+	if isBranch {
+		err = c.echoEvalf(`git merge --ff-only @{u}`)
+		if err != nil {
+			return err
+		}
 	}
-
 	return nil
 }
 
 func (c *getCmdContext) doClone(gitUrl, branchOrCommit string) error {
 	destinationDir := c.WorkingDir
 	c.WorkingDir = ""
-	gitCloneArgs := "--recursive"
-	if branchOrCommit != "" {
-		gitCloneArgs = fmt.Sprintf("%s --branch %s", gitCloneArgs, branchOrCommit)
-	}
 
-	err := c.echoEvalf(`git clone %s %s %s`, gitCloneArgs, gitUrl, destinationDir)
+	err := c.echoEvalf(`git clone --recursive %s %s`, gitUrl, destinationDir)
 	if err != nil {
 		return err
 	}
 
-	return nil
+	return c.echoEvalf(`git checkout %s`, branchOrCommit)
 }
