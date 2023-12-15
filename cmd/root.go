@@ -6,8 +6,17 @@ import (
 	"path/filepath"
 	"sync"
 
+	ignore "github.com/sabhiram/go-gitignore"
 	"github.com/spf13/cobra"
 )
+
+func getIgnore() *ignore.GitIgnore {
+	i, err := ignore.CompileIgnoreFile(filepath.Join(getWorkspaceDir(), ".gitorgignore"))
+	if err != nil {
+		return ignore.CompileIgnoreLines()
+	}
+	return i
+}
 
 func getWorkspaceDir() string {
 	return sync.OnceValue(func() string {

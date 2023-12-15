@@ -6,7 +6,9 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
+	ignore "github.com/sabhiram/go-gitignore"
 	"github.com/sourcegraph/conc/pool"
 	"github.com/spf13/cobra"
 )
@@ -92,6 +94,7 @@ type syncReposWorkerPool struct {
 	cloneRepos     bool
 	updateRepos    bool
 	archiveRepos   bool
+	ignore         *ignore.GitIgnore
 }
 
 func NewSyncReposWorkerPool(clone, update, archive bool, progressWriter *ProgressLogger) *syncReposWorkerPool {
@@ -101,8 +104,17 @@ func NewSyncReposWorkerPool(clone, update, archive bool, progressWriter *Progres
 		updateRepos:    update,
 		archiveRepos:   archive,
 		progressWriter: progressWriter,
+		ignore:         getIgnore(),
 	}
 	return &wp
+}
+
+func cleanName(s string) string {
+	s = strings.TrimPrefix(s, "https://")
+	s = strings.TrimPrefix(s, "http://")
+	s = strings.TrimSuffix(s, ".git")
+
+	return s
 }
 
 type remoteRepo struct {
@@ -128,6 +140,12 @@ func (p *syncReposWorkerPool) Wait() error {
 }
 
 func (p *syncReposWorkerPool) doWork(r remoteRepo) error {
+	cleanRepoName := cleanName(r.cloneUrl)
+	if p.ignore.MatchesPath(cleanRepoName) {
+		p.progressWriter.AddTotalToProgress(-1) // ignored, remove from total
+		return nil
+	}
+
 	gitUrl, _ := url.Parse(r.cloneUrl)
 	localDir := getLocalDir(gitUrl)
 	localDirExists := dirExists(localDir)

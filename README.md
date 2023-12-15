@@ -38,6 +38,7 @@ gitorg list                               # List all local repos in the workspac
 
 - `GITORG_WORKSPACE` can be set to a directory where you want to store your git repositories. By default it will use ~/gitorg
 - `GITLAB_HOSTS` can be set to a comma separated list of custom GitLab hosts
+- A `$GITORG_WORKSPACE/.gitorgignore` file can be used to ignore certain repos when using `gitorg sync`. This file uses the same syntax as `.gitignore` files and also applies to remote repos.
 
 ### Authentication
 
@@ -73,7 +74,7 @@ You can install autocompletion in your shell by running `gitorg completion`. Thi
  - --tidy: - find directories not part of remote
  - graceful shutdown - "index.lock exists Another git process seems to be running in this repository"
  - oauth2 authentication
- - --except-for or ignorefile
+ - ~--except-for or ignorefile~
  - `@latest` = the tag with the highest semver version
  - don't include skipped updates in stats
  - Ctrl-C during sync should display errors. Or just print errors in realtime

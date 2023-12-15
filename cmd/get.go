@@ -204,12 +204,20 @@ func (c *getCmdContext) isGitDirty() (bool, error) {
 		return false, err
 	}
 
-	return gitStatusPorcelain != "", nil
+	return strings.TrimSpace(gitStatusPorcelain) != "", nil
 }
 
 func (c *getCmdContext) isDetatched() bool {
 	_, err := c.doExec("git symbolic-ref HEAD")
 	return err != nil
+}
+
+func (c *getCmdContext) isOnRemoteHeadBranch(branch string) (bool, error) {
+	out, err := c.doExec("git branch -r origin/HEAD --contains " + branch)
+	if err != nil {
+		return false, err
+	}
+	return out != "", nil
 }
 
 func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
@@ -238,6 +246,15 @@ func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
 		}
 	}
 
+	// check that branchOrCommit exists on remote, which gives us confidence to hard reset
+	isOnRemoteHeadBranch, err := c.isOnRemoteHeadBranch(branchOrCommit)
+	if err != nil {
+		return err
+	}
+	if !isOnRemoteHeadBranch {
+		return fmt.Errorf("can't update '%s', %s/HEAD doesn't exist on remote", c.WorkingDir, branchOrCommit)
+	}
+
 	if c.isDetatched() {
 		return fmt.Errorf("can't update '%s', git directory is in detached head state", c.WorkingDir)
 	}
@@ -258,18 +275,9 @@ func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
 		return err
 	}
 
-	localHead, err := c.doExec(`git rev-parse HEAD`)
+	err = c.echoEvalf(`git reset --hard origin/%s`, branchOrCommit)
 	if err != nil {
 		return err
-	}
-	remoteHead, _ := c.doExec(`git rev-parse @{u}`)
-
-	needsFastForward := (localHead != remoteHead)
-	if needsFastForward {
-		err = c.echoEvalf(`git merge --ff-only @{u}`)
-		if err != nil {
-			return err
-		}
 	}
 
 	return nil
