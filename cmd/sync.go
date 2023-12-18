@@ -124,7 +124,7 @@ type syncReposWorkerPool struct {
 const MaxGoroutines = 100
 
 func NewSyncReposWorkerPool(ctx context.Context, clone, update, archive bool, progressWriter *ProgressLogger) *syncReposWorkerPool {
-	p := syncReposWorkerPool{
+	p := &syncReposWorkerPool{
 		workerPool:              pool.New().WithErrors().WithMaxGoroutines(MaxGoroutines).WithContext(ctx),
 		cloneRepos:              clone,
 		updateRepos:             update,
@@ -134,8 +134,9 @@ func NewSyncReposWorkerPool(ctx context.Context, clone, update, archive bool, pr
 		remoteReposChan:         make(chan remoteRepo, MaxGoroutines*5),
 		remoteReposChanFinished: make(chan bool),
 	}
-	go p.processRemoteReposChan()
-	return &p
+
+	go p.startRemoteReposChanListener()
+	return p
 }
 
 func (p *syncReposWorkerPool) createJob(r remoteRepo) func(ctx context.Context) error {
@@ -144,7 +145,7 @@ func (p *syncReposWorkerPool) createJob(r remoteRepo) func(ctx context.Context) 
 	}
 }
 
-func (p *syncReposWorkerPool) processRemoteReposChan() {
+func (p *syncReposWorkerPool) startRemoteReposChanListener() {
 	for r := range p.remoteReposChan {
 		p.workerPool.Go(p.createJob(r))
 	}
@@ -184,16 +185,6 @@ func (p *syncReposWorkerPool) canIgnore(r remoteRepo) bool {
 	if p.ignore.MatchesPath(cleanRepoName) {
 		p.progressWriter.EventIgnoredRepo(cleanRepoName)
 		return true
-	}
-
-	if r.isArchived {
-		gitUrl, _ := url.Parse(r.cloneUrl)
-		localDir := getLocalDir(gitUrl)
-		localDirExists := dirExists(localDir)
-		if !localDirExists {
-			p.progressWriter.EventIgnoredArchivedRepo(localDir)
-			return true
-		}
 	}
 
 	return false

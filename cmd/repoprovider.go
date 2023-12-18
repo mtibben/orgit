@@ -243,14 +243,13 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeA
 	for {
 		thisIterationOpt := opt
 		gitlabRequestPool.Go(func(ctx context.Context) error {
-
 			ps, resp, err := client.Groups.ListGroupProjects(org, &thisIterationOpt)
 			if err != nil {
 				return err
 			}
 
 			for _, p := range ps {
-				if p.Archived && !includeArchived {
+				if p.RepositoryAccessLevel == "disabled" {
 					continue
 				}
 

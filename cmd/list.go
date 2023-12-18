@@ -61,6 +61,7 @@ func printDirs(baseDir, dir string, printFullPath, flagDirty bool) {
 func init() {
 	var flagDirty bool
 	var printFullPath bool
+	var archived bool
 
 	var cmdList = &cobra.Command{
 		Use:   "list",
@@ -69,6 +70,9 @@ func init() {
 		Args:  cobra.NoArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			baseDir := getWorkspaceDir()
+			if archived {
+				baseDir = filepath.Join(baseDir, ".archive")
+			}
 
 			wg := sync.WaitGroup{}
 			forEachGitDirIn(baseDir, func(relativeDir string) {
@@ -85,6 +89,7 @@ func init() {
 
 	cmdList.Flags().BoolVar(&flagDirty, "dirty", false, "Filter by git directories with uncommitted changes")
 	cmdList.Flags().BoolVar(&printFullPath, "full-path", false, "Print the absolute path of each git directory")
+	cmdList.Flags().BoolVar(&archived, "archived", false, "List archived git directories")
 	rootCmd.AddCommand(cmdList)
 }
 

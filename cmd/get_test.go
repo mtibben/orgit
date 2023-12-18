@@ -1,10 +1,13 @@
 package cmd
 
 import (
+	"os"
 	"testing"
 )
 
 func TestGetArgs(t *testing.T) {
+	os.Setenv("GITORG_WORKSPACE", "/home/user/gitorg")
+
 	tableTests := []struct {
 		args                   string
 		expectedGitUrl         string

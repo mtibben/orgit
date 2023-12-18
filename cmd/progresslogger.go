@@ -119,7 +119,6 @@ func (p *ProgressLogger) EventSkippedRepo(localDir string) {
 
 func (p *ProgressLogger) EventIgnoredRepo(localDir string) {
 	p.statsIgnored.Add(1)
-	p.statsTotal.Add(-1)
 	p.PrintProgressLine()
 }
 
