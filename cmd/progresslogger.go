@@ -24,19 +24,22 @@ type ProgressLogger struct {
 	LogRealtimeProgress bool
 	LogInfo             bool
 
-	statsTotal               atomic.Int32
-	statsComplete            atomic.Int32
-	statsErrors              atomic.Int32
-	statsArchived            atomic.Int32
-	stateProgressLineRunning bool
+	statsTotal           atomic.Int32
+	statsComplete        atomic.Int32
+	statsIgnored         atomic.Int32
+	statsIgnoredArchived atomic.Int32
+	statsErrors          atomic.Int32
+	statsArchived        atomic.Int32
 
-	doneMsg string
+	stateProgressLineRunning bool
+	doneMsg                  string
 }
 
 func NewProgressLogger(logLevel string) *ProgressLogger {
 	switch logLevel {
 	case "debug":
 		return &ProgressLogger{
+			Printer:    syncprinter.NewPrinter(os.Stderr),
 			LogExecCmd: true,
 			WriterFor: func(localDir string) io.Writer {
 				return prefixer.New(os.Stderr, func() string {
@@ -114,6 +117,18 @@ func (p *ProgressLogger) EventSkippedRepo(localDir string) {
 	p.PrintProgressLine()
 }
 
+func (p *ProgressLogger) EventIgnoredRepo(localDir string) {
+	p.statsIgnored.Add(1)
+	p.statsTotal.Add(-1)
+	p.PrintProgressLine()
+}
+
+func (p *ProgressLogger) EventIgnoredArchivedRepo(localDir string) {
+	p.statsIgnoredArchived.Add(1)
+	p.statsTotal.Add(-1)
+	p.PrintProgressLine()
+}
+
 func (p *ProgressLogger) EventClonedRepo(localDir string) {
 	p.statsComplete.Add(1)
 	if p.LogSyncedRepo {
@@ -153,13 +168,13 @@ func (p *ProgressLogger) PrintProgressLine() {
 }
 
 func (p *ProgressLogger) statsStr() string {
-	numErrors := p.statsErrors.Load()
-	numArchived := p.statsArchived.Load()
-
 	stats := []string{}
+
+	numArchived := p.statsArchived.Load()
 	if numArchived >= 1 {
 		stats = append(stats, fmt.Sprintf("%d archived", numArchived))
 	}
+	numErrors := p.statsErrors.Load()
 	if numErrors == 1 {
 		stats = append(stats, "1 error")
 	} else if numErrors > 1 {

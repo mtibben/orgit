@@ -5,19 +5,22 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	ignore "github.com/sabhiram/go-gitignore"
 	"github.com/sourcegraph/conc/pool"
 	"github.com/spf13/cobra"
 )
 
+var logLevel = "info"
+
 func init() {
 	noClone := false
 	noUpdate := false
 	noArchive := false
-	logLevel := "auto"
 
 	var cmdSync = &cobra.Command{
 		Use:   "sync [flags] ORG_URL",
@@ -54,6 +57,11 @@ func init() {
 }
 
 func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, loglevel string) error {
+	logger := NewProgressLogger(loglevel)
+	defer logger.EndProgressLine("done")
+
+	ctx = handleSigterm(ctx, logger)
+
 	org := ""
 	provider, err := RepoProviderFor(orgUrlStr)
 	if err != nil {
@@ -71,10 +79,8 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 	}
 
 	localDir := getLocalDir(orgUrl)
-	logger := NewProgressLogger(loglevel)
 	logger.Info(fmt.Sprintf("Syncing to '%s'", localDir))
-
-	workerPool := NewSyncReposWorkerPool(clone, update, archive, logger)
+	workerPool := NewSyncReposWorkerPool(ctx, clone, update, archive, logger)
 
 	err = provider.ListRepos(ctx, org, archive, workerPool.GoGetUrl)
 	if err != nil {
@@ -88,25 +94,61 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 	return nil
 }
 
-type syncReposWorkerPool struct {
-	errorPool      *pool.ErrorPool
-	progressWriter *ProgressLogger
-	cloneRepos     bool
-	updateRepos    bool
-	archiveRepos   bool
-	ignore         *ignore.GitIgnore
+func handleSigterm(ctx context.Context, logger *ProgressLogger) context.Context {
+	var cancelFunc context.CancelFunc
+	ctx, cancelFunc = context.WithCancel(ctx)
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		logger.EndProgressLine("cancelling...")
+		cancelFunc()
+		os.Exit(1)
+	}()
+
+	return ctx
 }
 
-func NewSyncReposWorkerPool(clone, update, archive bool, progressWriter *ProgressLogger) *syncReposWorkerPool {
-	wp := syncReposWorkerPool{
-		errorPool:      pool.New().WithErrors(),
-		cloneRepos:     clone,
-		updateRepos:    update,
-		archiveRepos:   archive,
-		progressWriter: progressWriter,
-		ignore:         getIgnore(),
+type syncReposWorkerPool struct {
+	workerPool              *pool.ContextPool
+	progressWriter          *ProgressLogger
+	cloneRepos              bool
+	updateRepos             bool
+	archiveRepos            bool
+	ignore                  *ignore.GitIgnore
+	remoteReposChan         chan remoteRepo
+	remoteReposChanFinished chan bool
+}
+
+const MaxGoroutines = 100
+
+func NewSyncReposWorkerPool(ctx context.Context, clone, update, archive bool, progressWriter *ProgressLogger) *syncReposWorkerPool {
+	p := syncReposWorkerPool{
+		workerPool:              pool.New().WithErrors().WithMaxGoroutines(MaxGoroutines).WithContext(ctx),
+		cloneRepos:              clone,
+		updateRepos:             update,
+		archiveRepos:            archive,
+		progressWriter:          progressWriter,
+		ignore:                  getIgnore(),
+		remoteReposChan:         make(chan remoteRepo, MaxGoroutines*5),
+		remoteReposChanFinished: make(chan bool),
 	}
-	return &wp
+	go p.processRemoteReposChan()
+	return &p
+}
+
+func (p *syncReposWorkerPool) createJob(r remoteRepo) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		return p.doWork(r)
+	}
+}
+
+func (p *syncReposWorkerPool) processRemoteReposChan() {
+	for r := range p.remoteReposChan {
+		p.workerPool.Go(p.createJob(r))
+	}
+	p.remoteReposChanFinished <- true
 }
 
 func cleanName(s string) string {
@@ -118,34 +160,46 @@ func cleanName(s string) string {
 }
 
 type remoteRepo struct {
-	cloneUrl   string
-	isArchived bool
+	cloneUrl      string
+	isArchived    bool
+	defaultBranch string
 }
 
 func (p *syncReposWorkerPool) GoGetUrl(r remoteRepo) {
+	if p.canIgnore(r) {
+		return
+	}
 	p.progressWriter.AddTotalToProgress(1)
-	p.errorPool.Go(func() error {
-		return p.doWork(r)
-	})
+	p.remoteReposChan <- r
 }
 
 func (p *syncReposWorkerPool) Wait() error {
-	err := p.errorPool.Wait()
-	if err == nil {
-		p.progressWriter.EndProgressLine("done")
-	} else {
-		p.progressWriter.EndProgressLine("done with errors")
+	close(p.remoteReposChan)
+	<-p.remoteReposChanFinished
+	return p.workerPool.Wait()
+}
+
+func (p *syncReposWorkerPool) canIgnore(r remoteRepo) bool {
+	cleanRepoName := cleanName(r.cloneUrl)
+	if p.ignore.MatchesPath(cleanRepoName) {
+		p.progressWriter.EventIgnoredRepo(cleanRepoName)
+		return true
 	}
-	return err
+
+	if r.isArchived {
+		gitUrl, _ := url.Parse(r.cloneUrl)
+		localDir := getLocalDir(gitUrl)
+		localDirExists := dirExists(localDir)
+		if !localDirExists {
+			p.progressWriter.EventIgnoredArchivedRepo(localDir)
+			return true
+		}
+	}
+
+	return false
 }
 
 func (p *syncReposWorkerPool) doWork(r remoteRepo) error {
-	cleanRepoName := cleanName(r.cloneUrl)
-	if p.ignore.MatchesPath(cleanRepoName) {
-		p.progressWriter.AddTotalToProgress(-1) // ignored, remove from total
-		return nil
-	}
-
 	gitUrl, _ := url.Parse(r.cloneUrl)
 	localDir := getLocalDir(gitUrl)
 	localDirExists := dirExists(localDir)
@@ -163,7 +217,7 @@ func (p *syncReposWorkerPool) doWork(r remoteRepo) error {
 			}
 		} else {
 			// no action required, remove this repo from total
-			p.progressWriter.AddTotalToProgress(-1)
+			p.progressWriter.EventIgnoredArchivedRepo(localDir)
 		}
 		return nil
 	}
@@ -176,7 +230,7 @@ func (p *syncReposWorkerPool) doWork(r remoteRepo) error {
 	}
 	if localDirExists {
 		if p.updateRepos {
-			err := c.doUpdate(gitUrl, "")
+			err := c.doUpdate(gitUrl, r.defaultBranch)
 			if err != nil {
 				p.progressWriter.EventSyncedRepoError(localDir)
 				return err

@@ -201,19 +201,22 @@ func (c *getCmdContext) findDefaultBranchNameWithSetHead() (string, error) {
 
 var errNoCommits = fmt.Errorf("no commits")
 
+func (c *getCmdContext) hasNoCommits() bool {
+	logOut, err := c.doExec(`git log -n 1`)
+	return err != nil && strings.Contains(logOut, "does not have any commits yet")
+}
+
 func (c *getCmdContext) getDefaultBranchName() (string, error) {
 	defaultBranch, err1 := c.doExec(`git symbolic-ref --short refs/remotes/origin/HEAD`)
 	if err1 != nil {
 
-		// can't find origin/HEAD. Perhaps this is a repo without any commits yet?
-		logOut, err2 := c.doExec(`git log -n 1`)
-		if err2 != nil && strings.Contains(logOut, "does not have any commits yet") {
+		if c.hasNoCommits() {
 			return "", errNoCommits
 		}
 
-		var err3 error
-		defaultBranch, err3 = c.findDefaultBranchNameWithSetHead()
-		if err3 != nil {
+		var err2 error
+		defaultBranch, err2 = c.findDefaultBranchNameWithSetHead()
+		if err2 != nil {
 			// can't find default branch name, return the original err1
 			return "", err1
 		}
@@ -248,6 +251,20 @@ func (c *getCmdContext) isLocked() bool {
 	return fileExists(filepath.Join(c.WorkingDir, ".git", "index.lock"))
 }
 
+func (c *getCmdContext) stash() error {
+	err := c.echoEval(`git stash push --include-untracked --message "gitorg"`)
+	if err != nil {
+		if c.hasNoCommits() {
+			return errNoCommits
+		}
+	}
+	return err
+}
+
+func (c *getCmdContext) isABranch(branchOrCommit string) bool {
+	return !c.isDetatched(branchOrCommit)
+}
+
 func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
 	if c.isLocked() {
 		return fmt.Errorf("can't update '%s', another git process seems to be running in this repository: .git/index.lock exists", c.WorkingDir)
@@ -277,9 +294,11 @@ func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
 		return fmt.Errorf("can't update '%s', HEAD is detached", c.WorkingDir)
 	}
 
-	// stash any uncommitted changes opportunistically
-	err = c.echoEvalf(`git stash push --include-untracked --message "gitorg stash while checking out %s"`, branchOrCommit)
-	if err != nil {
+	// optimistically stash any uncommitted changes
+	err = c.stash()
+	if err == errNoCommits {
+		return nil // nothing we can do on a repo without commits
+	} else if err != nil {
 		return err
 	}
 
@@ -288,8 +307,7 @@ func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
 		return err
 	}
 
-	isBranch := !c.isDetatched(branchOrCommit)
-	if isBranch {
+	if c.isABranch(branchOrCommit) {
 		err = c.echoEvalf(`git merge --ff-only @{u}`)
 		if err != nil {
 			return err

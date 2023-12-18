@@ -87,7 +87,7 @@ If you wish to use SSH transport instead of HTTPS, you can override the URL in y
 
 
 ## TODO: wanted features
- - --status
+ - list --status --tree
  - --tidy: - find directories not part of remote
  - graceful shutdown - "index.lock exists Another git process seems to be running in this repository"
  - oauth2 authentication

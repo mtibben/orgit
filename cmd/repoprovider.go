@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/google/go-github/v57/github"
 	"github.com/jdxcode/netrc"
+	"github.com/sourcegraph/conc/pool"
 	gitlab "github.com/xanzy/go-gitlab"
 )
 
@@ -205,7 +207,13 @@ func NewGitlabRepoProvider(host string) GitlabRepoProvider {
 
 func (gl GitlabRepoProvider) getClient(ctx context.Context) (*gitlab.Client, error) {
 	gitlabToken := getNetrcPasswordForMachine(gl.host)
-	return gitlab.NewClient(gitlabToken)
+	options := []gitlab.ClientOptionFunc{}
+
+	if logLevel == "debug" {
+		options = append(options, gitlab.WithCustomLogger(log.New(os.Stderr, "", log.LstdFlags)))
+	}
+
+	return gitlab.NewClient(gitlabToken, options...)
 }
 
 func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, cloneUrlFunc func(remoteRepo)) error {
@@ -214,37 +222,62 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeA
 		return err
 	}
 
-	opt := &gitlab.ListGroupProjectsOptions{
+	opt := gitlab.ListGroupProjectsOptions{
 		ListOptions: gitlab.ListOptions{
 			PerPage: apiPageSize,
+			OrderBy: "id",
+			Sort:    "desc", // newest first, older repos have more chance of being archived
 			Page:    1,
 		},
 		IncludeSubGroups: gitlab.Ptr(true),
 		MinAccessLevel:   gitlab.Ptr(gitlab.DeveloperPermissions),
 	}
+	if !includeArchived {
+		opt.Archived = gitlab.Ptr(false)
+	}
 
+	// use a worker pool to pull down data from gitlab in parallel
+	gitlabRequestPool := pool.New().WithMaxGoroutines(3).WithContext(context.Background()).WithCancelOnError().WithFirstError()
+
+	noMoreResults := false
 	for {
-		ps, resp, err := client.Groups.ListGroupProjects(org, opt)
-		if err != nil {
-			return err
-		}
-		for _, p := range ps {
-			if p.Archived && !includeArchived {
-				continue
+		thisIterationOpt := opt
+		gitlabRequestPool.Go(func(ctx context.Context) error {
+
+			ps, resp, err := client.Groups.ListGroupProjects(org, &thisIterationOpt)
+			if err != nil {
+				return err
 			}
 
-			r := remoteRepo{
-				cloneUrl:   p.HTTPURLToRepo,
-				isArchived: p.Archived,
-			}
-			cloneUrlFunc(r)
-		}
+			for _, p := range ps {
+				if p.Archived && !includeArchived {
+					continue
+				}
 
-		if resp.NextPage == 0 {
+				r := remoteRepo{
+					cloneUrl:      p.HTTPURLToRepo,
+					isArchived:    p.Archived,
+					defaultBranch: p.DefaultBranch,
+				}
+				cloneUrlFunc(r)
+			}
+
+			if resp.NextPage == 0 {
+				noMoreResults = true
+			}
+
+			return nil
+		})
+		opt.Page++
+
+		if noMoreResults {
 			break
 		}
+	}
 
-		opt.Page = resp.NextPage
+	err = gitlabRequestPool.Wait()
+	if err != nil {
+		return err
 	}
 
 	return nil
