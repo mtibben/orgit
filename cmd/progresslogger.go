@@ -144,11 +144,14 @@ func (p *ProgressLogger) EndProgressLine(doneMsg string) {
 
 func (p *ProgressLogger) Info(s string) {
 	if p.LogInfo {
-		prefix := ""
-		if p.LogRealtimeProgress && p.stateProgressLineRunning {
-			prefix = "\n"
+		firstChar := ""
+		lastChar := ""
+		if p.stateProgressLineRunning {
+			firstChar = ansiClearLine
+			lastChar = ansiSaveCursorPosition
 		}
-		p.Printer.Printf("%s%s\n", prefix, s)
+		p.Printer.Printf("%s%s\n%s", firstChar, s, lastChar)
+		p.PrintProgressLine()
 	}
 }
 
