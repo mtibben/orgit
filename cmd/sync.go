@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	ignore "github.com/sabhiram/go-gitignore"
 	"github.com/sourcegraph/conc/pool"
@@ -82,13 +83,14 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 	logger.Info(fmt.Sprintf("Syncing to '%s'", localDir))
 	workerPool := NewSyncReposWorkerPool(ctx, clone, update, archive, logger)
 
-	err = provider.ListRepos(ctx, org, archive, workerPool.GoGetUrl)
+	err = provider.ListRepos(ctx, org, archive, workerPool.AddUrl)
 	if err != nil {
 		return fmt.Errorf("couldn't list repos for '%s': %w", orgUrlStr, err)
 	}
 
-	if err := workerPool.Wait(); err != nil {
-		return err
+	err = workerPool.Wait()
+	if err != nil {
+		return fmt.Errorf("Sync didn't fully complete")
 	}
 
 	return nil
@@ -98,14 +100,16 @@ func handleSigterm(ctx context.Context, logger *ProgressLogger) context.Context 
 	var cancelFunc context.CancelFunc
 	ctx, cancelFunc = context.WithCancel(ctx)
 
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	shutdownListener := make(chan os.Signal, 1)
 	go func() {
-		<-c
+		<-shutdownListener
+		logger.LogInfo = false
 		logger.EndProgressLine("cancelling...")
 		cancelFunc()
 		os.Exit(1)
 	}()
+
+	signal.Notify(shutdownListener, os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
 	return ctx
 }
@@ -125,7 +129,7 @@ const MaxGoroutines = 100
 
 func NewSyncReposWorkerPool(ctx context.Context, clone, update, archive bool, progressWriter *ProgressLogger) *syncReposWorkerPool {
 	p := &syncReposWorkerPool{
-		workerPool:              pool.New().WithErrors().WithMaxGoroutines(MaxGoroutines).WithContext(ctx),
+		workerPool:              pool.New().WithMaxGoroutines(MaxGoroutines).WithContext(ctx),
 		cloneRepos:              clone,
 		updateRepos:             update,
 		archiveRepos:            archive,
@@ -139,9 +143,16 @@ func NewSyncReposWorkerPool(ctx context.Context, clone, update, archive bool, pr
 	return p
 }
 
-func (p *syncReposWorkerPool) createJob(r remoteRepo) func(ctx context.Context) error {
+func (p *syncReposWorkerPool) createJob(r remoteRepo) func(context.Context) error {
 	return func(ctx context.Context) error {
-		return p.doWork(r)
+		err := p.doWork(r)
+		if err != nil {
+			// if Ctrl-C is used, 100s of errors can be printed.
+			// Adding a short delay allows us time to turn off info Info logging before printing the error
+			time.Sleep(100 * time.Millisecond)
+			p.progressWriter.Info(err.Error())
+		}
+		return err
 	}
 }
 
@@ -166,7 +177,7 @@ type remoteRepo struct {
 	defaultBranch string
 }
 
-func (p *syncReposWorkerPool) GoGetUrl(r remoteRepo) {
+func (p *syncReposWorkerPool) AddUrl(r remoteRepo) {
 	if p.canIgnore(r) {
 		return
 	}
@@ -264,5 +275,10 @@ func (p *syncReposWorkerPool) archive(localDir string) error {
 		}
 	}
 
-	return os.Rename(localDir, newArchivedDir)
+	err = os.Rename(localDir, newArchivedDir)
+	if err == nil {
+		p.progressWriter.Info(fmt.Sprintf("Archived '%s' to '%s'", localDir, newArchivedDir))
+	}
+
+	return err
 }

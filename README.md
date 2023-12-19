@@ -1,13 +1,13 @@
 # gitorg
 
-`gitorg` is a tool for cloning and organising git repositories. It's like `go get` for git.
+`gitorg` is a tool for organising git repositories. It's like `go get` for git.
 
 
 ## Why use `gitorg`?
 
 `gitorg` is useful if you need to manage a large number of git repositories, especially if they are organised in a tree structure, like you find in GitLab Groups.
 
-`gitorg` streamlines cloning repos, organising repos in a consistent stucture, and keeping repos up-to-date.
+`gitorg` streamlines cloning repos, organising repos in a consistent stucture, and keeping repos up-to-date with their remote.
 
 `gitorg`'s features and goals:
   * sensible defaults, so you can use it immediately without any special setup or config
@@ -19,23 +19,23 @@
 
 ## How it works
 
-`gitorg` organises your git repositories in your workspace directory in a tree structure that mirrors the URL structure of the remote git repository. For example, if you have a git repository with the URL github.com/my-org/my-repo, then `gitorg` will clone it into `$GITORG_WORKSPACE/github.com/my-org/my-repo`.
+`gitorg` organises your git repositories in your workspace directory in a tree structure that mirrors the URL structure of the remote git repository. For example, if you have a git repository with the URL `https://github.com/my-org/my-repo`, then `gitorg` will clone it into `$GITORG_WORKSPACE/github.com/my-org/my-repo`.
 
 There are three commands.
-- `gitorg get REPO_URL` will clone a single git repository using the repo's web URL.
-- `gitorg sync ORG_URL` will recursively clone and update all git repositories from GitHub or GitLab using the org, user or group URL.
+- `gitorg get REPO_URL@COMMIT` will clone a repository using the repo's web URL.
+- `gitorg sync ORG_URL` will recursively clone or pull all repositories using the GitHub or GitLab org, user or group URL.
 - `gitorg list` will list all git repositories in the workspace.
 
-Note that `gitorg` assumes that:
- - `origin` is the default remote
- - git uses `https` as the git transport. To use SSH instead, override the URL in your `.gitconfig` (see example below)
+Note that `gitorg` uses:
+ - `origin` as the default remote
+ - `https` as the git transport. To use SSH instead, override the URL in your `.gitconfig` (see example below)
 
 
 ## Example use
 
 ```shell
-export GITORG_WORKSPACE=~/Developer/src   # Set the gitorg workspace. The git workspace is a directory that mirrors
-                                          # the remote git repository's URL structure.
+export GITORG_WORKSPACE=~/Developer/src   # Set the gitorg workspace. The gitorg workspace is a directory that mirrors
+                                          # the remote repository URL structure.
 gitorg get github.com/my-org/my-project   # Clone a repo into $GITORG_WORKSPACE/github.com/my-org/my-project
 gitorg sync github.com/my-org             # Clone all remote repos from the remote org in parallel
 gitorg list                               # List all local repos in the workspace
@@ -75,7 +75,7 @@ A useful shell alias for changing directory to a repo using `fzf`
 alias gcd="cd \$(gitorg list --full-path | fzf) && pwd"
 ```
 
-You can install autocompletion in your shell by running `gitorg completion`. This will install a completion script for bash, zsh, fish, and powershell.
+Using shell autocompletion is useful, install it in your shell with `gitorg completion`
 
 If you wish to use SSH transport instead of HTTPS, you can override the URL in your `.gitconfig` file. For example:
 ```ini
