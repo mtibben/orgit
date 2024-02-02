@@ -1,20 +1,18 @@
 # gitorg
 
-`gitorg` is a tool for organising git repositories. It's like `go get` for git.
+`gitorg` is a cli tool for organising and syncing large numbers of git repositories in a consistent and fast way.
 
 
 ## Why use `gitorg`?
 
-`gitorg` is useful if you need to manage a large number of git repositories, especially if they are organised in a tree structure, like you find in GitLab Groups.
+`gitorg` streamlines cloning repos to a consistent location, and keeps them up-to-date with their remote. It's useful for developers who work with many git repositories, and especially for those who work with many repositories from multiple GitHub or GitLab orgs.
 
-`gitorg` streamlines cloning repos, organising repos in a consistent stucture, and keeping repos up-to-date with their remote.
-
-`gitorg`'s features and goals:
-  * sensible defaults, so you can use it immediately without any special setup or config
-  * relies on the git CLI for all git operations, so all config that applies to git is respected
-  * uses concurrency wherever possible, so it's fast
-  * supports nested trees of git repositories, so it supports GitLab Groups
-  * has a small, focussed feature-set, so it's easy to understand and use
+`gitorg`'s goals:
+  * sensible defaults: so you can use it immediately without any special setup or config
+  * minimal config: relies on the git CLI for all git operations, so all config that applies to git is respected
+  * fast: uses concurrency wherever possible
+  * small: a focussed feature-set, so it's easy to understand and use
+  * make it just work: interoperable with popular git hosting services GitHub and GitLab, support Gitlab Groups and nested repositories
 
 
 ## How it works
@@ -87,11 +85,11 @@ If you wish to use SSH transport instead of HTTPS, you can override the URL in y
 
 
 ## TODO: wanted features
+ - ~--except-for or ignorefile~
  - list --status --tree
  - --tidy: - find directories not part of remote
  - graceful shutdown - "index.lock exists Another git process seems to be running in this repository"
  - oauth2 authentication
- - ~--except-for or ignorefile~
  - `@latest` = the tag with the highest semver version
  - don't include skipped updates in stats
  - Ctrl-C during sync should display errors. Or just print errors in realtime
