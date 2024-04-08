@@ -260,7 +260,7 @@ func (c *getCmdContext) isLocked() bool {
 }
 
 func (c *getCmdContext) stash() error {
-	err := c.echoEval(`git stash push --include-untracked --message "gitorg"`)
+	err := c.echoEval(`git stash push --include-untracked --message "orgit"`)
 	if err != nil {
 		if c.hasNoCommits() {
 			return errNoCommits

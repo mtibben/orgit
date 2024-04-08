@@ -19,7 +19,7 @@ func fileExists(path string) bool {
 }
 
 func getIgnore() *ignore.GitIgnore {
-	i, err := ignore.CompileIgnoreFile(filepath.Join(getWorkspaceDir(), ".gitorgignore"))
+	i, err := ignore.CompileIgnoreFile(filepath.Join(getWorkspaceDir(), ".orgitignore"))
 	if err != nil {
 		return ignore.CompileIgnoreLines()
 	}
@@ -28,7 +28,7 @@ func getIgnore() *ignore.GitIgnore {
 
 func getWorkspaceDir() string {
 	return sync.OnceValue(func() string {
-		baseDirFromEnv := os.Getenv("GITORG_WORKSPACE")
+		baseDirFromEnv := os.Getenv("ORGIT_WORKSPACE")
 		if baseDirFromEnv != "" {
 			return baseDirFromEnv
 		}
@@ -37,13 +37,13 @@ func getWorkspaceDir() string {
 		if err != nil {
 			panic(err)
 		}
-		return filepath.Join(homedir, "gitorg")
+		return filepath.Join(homedir, "orgit")
 	})()
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "gitorg",
-	Short: "gitorg is a tool for organising git repositories",
+	Use:   "orgit",
+	Short: "orgit is a tool for organising git repositories",
 }
 
 func Execute() {

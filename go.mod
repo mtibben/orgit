@@ -1,4 +1,4 @@
-module github.com/99designs/gitorg
+module github.com/mtibben/orgit
 
 go 1.21.4
 

@@ -1,13 +1,13 @@
-# gitorg
+# orgit
 
-`gitorg` is a cli tool for organising and syncing git repositories in a consistent and fast way.
+`orgit` is a cli tool for organising and syncing git repositories in a consistent and fast way.
 
 
-## Why use `gitorg`?
+## Why use `orgit`?
 
-`gitorg` streamlines cloning repos to a consistent location, and keeping them up-to-date. It's useful for developers who work with many git repositories and GitHub or GitLab orgs.
+`orgit` streamlines cloning repos to a consistent location, and keeping them up-to-date. It's useful for developers who work with many git repositories and GitHub or GitLab orgs.
 
-`gitorg`'s goals:
+`orgit`'s goals:
   * sensible defaults: so you can use it immediately without any special setup or config
   * minimal config: relies on the git CLI for all git operations, so all config that applies to git is respected
   * fast: uses concurrency wherever possible
@@ -17,14 +17,14 @@
 
 ## How it works
 
-`gitorg` organises your git repositories in your workspace directory in a tree structure that mirrors the URL structure of the remote git repository. For example, if you have a git repository with the URL `https://github.com/my-org/my-repo`, then `gitorg` will clone it into `$GITORG_WORKSPACE/github.com/my-org/my-repo`.
+`orgit` organises your git repositories in your workspace directory in a tree structure that mirrors the URL structure of the remote git repository. For example, if you have a git repository with the URL `https://github.com/my-org/my-repo`, then `orgit` will clone it into `$ORGIT_WORKSPACE/github.com/my-org/my-repo`.
 
 There are three commands.
-- `gitorg get REPO_URL@COMMIT` will clone a repository using the repo's web URL.
-- `gitorg sync ORG_URL` will recursively clone or pull all repositories using the GitHub or GitLab org, user or group URL.
-- `gitorg list` will list all git repositories in the workspace.
+- `orgit get REPO_URL@COMMIT` will clone a repository using the repo's web URL.
+- `orgit sync ORG_URL` will recursively clone or pull all repositories using the GitHub or GitLab org, user or group URL.
+- `orgit list` will list all git repositories in the workspace.
 
-Note that `gitorg` always uses:
+Note that `orgit` always uses:
  - `origin` as the default remote
  - `https` as the git transport. To use SSH instead, override the URL in your `.gitconfig` (see example below)
 
@@ -32,23 +32,23 @@ Note that `gitorg` always uses:
 ## Example use
 
 ```shell
-export GITORG_WORKSPACE=~/Developer/src   # Set the gitorg workspace. The gitorg workspace is a directory that mirrors
+export ORGIT_WORKSPACE=~/Developer/src   # Set the orgit workspace. The orgit workspace is a directory that mirrors
                                           # the remote repository URL structure.
-gitorg get github.com/my-org/my-project   # Clone a repo into $GITORG_WORKSPACE/github.com/my-org/my-project
-gitorg sync github.com/my-org             # Clone all repos from the remote org in parallel
-gitorg list                               # List all local repos in the workspace
+orgit get github.com/my-org/my-project   # Clone a repo into $ORGIT_WORKSPACE/github.com/my-org/my-project
+orgit sync github.com/my-org             # Clone all repos from the remote org in parallel
+orgit list                               # List all local repos in the workspace
 ```
 
 
 ## Configuration
 
-- `GITORG_WORKSPACE` can be set to a directory where you want to store your git repositories. By default it will use ~/gitorg
+- `ORGIT_WORKSPACE` can be set to a directory where you want to store your git repositories. By default it will use ~/orgit
 - `GITLAB_HOSTS` can be set to a comma separated list of custom GitLab hosts
-- A `$GITORG_WORKSPACE/.gitorgignore` file can be used to ignore certain repos when using `gitorg sync`. This file uses the same syntax as `.gitignore` files and also applies to remote repos.
+- A `$ORGIT_WORKSPACE/.orgitignore` file can be used to ignore certain repos when using `orgit sync`. This file uses the same syntax as `.gitignore` files and also applies to remote repos.
 
 ### Authentication
 
-In order to use the `gitorg sync` command, you'll need to use the GitHub or GitLab API. You can set up authentication for GitHub and GitLab using your `.netrc` file.
+In order to use the `orgit sync` command, you'll need to use the GitHub or GitLab API. You can set up authentication for GitHub and GitLab using your `.netrc` file.
 
 For example:
 ```
@@ -70,10 +70,10 @@ machine gitlab.com
 
 A useful shell alias for changing directory to a repo using `fzf`
 ```shell
-alias gcd="cd \$(gitorg list --full-path | fzf) && pwd"
+alias gcd="cd \$(orgit list --full-path | fzf) && pwd"
 ```
 
-Using shell autocompletion is useful, install it in your shell with `gitorg completion`
+Using shell autocompletion is useful, install it in your shell with `orgit completion`
 
 If you wish to use SSH transport instead of HTTPS, you can override the URL in your `.gitconfig` file. For example:
 ```ini

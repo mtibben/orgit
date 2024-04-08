@@ -6,7 +6,7 @@ import (
 )
 
 func TestGetArgs(t *testing.T) {
-	os.Setenv("GITORG_WORKSPACE", "/home/user/gitorg")
+	os.Setenv("ORGIT_WORKSPACE", "/home/user/orgit")
 
 	tableTests := []struct {
 		args                   string
@@ -15,10 +15,10 @@ func TestGetArgs(t *testing.T) {
 		expectedDir            string
 		expectedError          error
 	}{
-		{"github.com/user/project@commit", "https://github.com/user/project.git", "commit", "/home/user/gitorg/github.com/user/project", nil},
-		{"github.com/user/project", "https://github.com/user/project.git", "", "/home/user/gitorg/github.com/user/project", nil},
-		{"github.com/org/group/project", "https://github.com/org/group/project.git", "", "/home/user/gitorg/github.com/org/group/project", nil},
-		{"github.com/org/group/project/", "https://github.com/org/group/project.git", "", "/home/user/gitorg/github.com/org/group/project", nil},
+		{"github.com/user/project@commit", "https://github.com/user/project.git", "commit", "/home/user/orgit/github.com/user/project", nil},
+		{"github.com/user/project", "https://github.com/user/project.git", "", "/home/user/orgit/github.com/user/project", nil},
+		{"github.com/org/group/project", "https://github.com/org/group/project.git", "", "/home/user/orgit/github.com/org/group/project", nil},
+		{"github.com/org/group/project/", "https://github.com/org/group/project.git", "", "/home/user/orgit/github.com/org/group/project", nil},
 	}
 
 	for i, tt := range tableTests {

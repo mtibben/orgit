@@ -30,7 +30,7 @@ func init() {
 		Long: `Syncing will:
  1. clone all repositories from a GitHub/GitLab user/org/group
  2. update local repos by stashing uncommitted changes and switching to origin HEAD
- 3. archive local repos that have been archived remotely by moving them to $GITORG_WORKSPACE/.archive
+ 3. archive local repos that have been archived remotely by moving them to $ORGIT_WORKSPACE/.archive
 `,
 		Run: func(cmd *cobra.Command, args []string) {
 			orgUrlArg := args[0]

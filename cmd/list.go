@@ -10,7 +10,7 @@ import (
 	"sync"
 	"unicode"
 
-	"github.com/99designs/gitorg/syncprinter"
+	"github.com/mtibben/orgit/syncprinter"
 	"github.com/spf13/cobra"
 )
 

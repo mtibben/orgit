@@ -8,9 +8,9 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/99designs/gitorg/syncprinter"
 	"github.com/egymgmbh/go-prefix-writer/prefixer"
 	"github.com/fatih/color"
+	"github.com/mtibben/orgit/syncprinter"
 )
 
 const ansiSaveCursorPosition = "\033[s"

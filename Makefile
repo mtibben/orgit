@@ -1,2 +1,2 @@
 install:
-	go build -o ~/bin/gitorg .
+	go build -o ~/bin/orgit .

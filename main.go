@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/99designs/gitorg/cmd"
+	"github.com/mtibben/orgit/cmd"
 )
 
 func main() {
