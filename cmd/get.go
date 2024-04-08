@@ -227,9 +227,17 @@ func (c *getCmdContext) getDefaultBranchName() (string, error) {
 	return defaultBranch, nil
 }
 
-func (c *getCmdContext) isDetatched(ref string) bool {
-	_, err := c.doExec("git symbolic-ref " + ref)
-	return err != nil
+func (c *getCmdContext) isDetachedHead() bool {
+	out, err := c.doExec(`git rev-parse --abbrev-ref --symbolic-full-name HEAD`)
+	if err != nil {
+		panic(err)
+	}
+	return out == "HEAD"
+}
+
+func (c *getCmdContext) isSymbolicRef(ref string) bool {
+	err := c.echoEvalf(`git symbolic-ref %s`, ref)
+	return err == nil
 }
 
 func (c *getCmdContext) fixRemoteConfig(gitUrl *url.URL) error {
@@ -262,7 +270,7 @@ func (c *getCmdContext) stash() error {
 }
 
 func (c *getCmdContext) isABranch(branchOrCommit string) bool {
-	return !c.isDetatched(branchOrCommit)
+	return !c.isSymbolicRef(branchOrCommit)
 }
 
 func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
@@ -290,7 +298,7 @@ func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
 	}
 
 	// don't want to clobber a git repo in a detached state
-	if c.isDetatched("HEAD") {
+	if c.isDetachedHead() {
 		return fmt.Errorf("can't update '%s', HEAD is detached", c.WorkingDir)
 	}
 

@@ -43,7 +43,7 @@ func getWorkspaceDir() string {
 
 var rootCmd = &cobra.Command{
 	Use:   "gitorg",
-	Short: "Gitorg is a tool for organising git repositories",
+	Short: "gitorg is a tool for organising git repositories",
 }
 
 func Execute() {

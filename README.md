@@ -1,11 +1,11 @@
 # gitorg
 
-`gitorg` is a cli tool for organising and syncing large numbers of git repositories in a consistent and fast way.
+`gitorg` is a cli tool for organising and syncing git repositories in a consistent and fast way.
 
 
 ## Why use `gitorg`?
 
-`gitorg` streamlines cloning repos to a consistent location, and keeps them up-to-date with their remote. It's useful for developers who work with many git repositories, and especially for those who work with many repositories from multiple GitHub or GitLab orgs.
+`gitorg` streamlines cloning repos to a consistent location, and keeping them up-to-date. It's useful for developers who work with many git repositories and GitHub or GitLab orgs.
 
 `gitorg`'s goals:
   * sensible defaults: so you can use it immediately without any special setup or config
@@ -24,7 +24,7 @@ There are three commands.
 - `gitorg sync ORG_URL` will recursively clone or pull all repositories using the GitHub or GitLab org, user or group URL.
 - `gitorg list` will list all git repositories in the workspace.
 
-Note that `gitorg` uses:
+Note that `gitorg` always uses:
  - `origin` as the default remote
  - `https` as the git transport. To use SSH instead, override the URL in your `.gitconfig` (see example below)
 
@@ -35,7 +35,7 @@ Note that `gitorg` uses:
 export GITORG_WORKSPACE=~/Developer/src   # Set the gitorg workspace. The gitorg workspace is a directory that mirrors
                                           # the remote repository URL structure.
 gitorg get github.com/my-org/my-project   # Clone a repo into $GITORG_WORKSPACE/github.com/my-org/my-project
-gitorg sync github.com/my-org             # Clone all remote repos from the remote org in parallel
+gitorg sync github.com/my-org             # Clone all repos from the remote org in parallel
 gitorg list                               # List all local repos in the workspace
 ```
 
