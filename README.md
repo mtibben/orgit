@@ -28,6 +28,12 @@ Note that `orgit` always uses:
  - `origin` as the default remote
  - `https` as the git transport. To use SSH instead, override the URL in your `.gitconfig` (see example below)
 
+## Installing
+
+```shell
+go install github.com/mtibben/orgit@latest
+```
+
 
 ## Example use
 
@@ -42,7 +48,7 @@ orgit list                               # List all local repos in the workspace
 
 ## Configuration
 
-- `ORGIT_WORKSPACE` can be set to a directory where you want to store your git repositories. By default it will use ~/orgit
+- `ORGIT_WORKSPACE` can be set to a directory where you want to store your git repositories. By default it will use `~/orgit`
 - `GITLAB_HOSTS` can be set to a comma separated list of custom GitLab hosts
 - A `$ORGIT_WORKSPACE/.orgitignore` file can be used to ignore certain repos when using `orgit sync`. This file uses the same syntax as `.gitignore` files and also applies to remote repos.
 
@@ -87,13 +93,15 @@ If you wish to use SSH transport instead of HTTPS, you can override the URL in y
 ## TODO: wanted features
  - ~ignorefile like .gitignore~ done
  - ~Ctrl-C to cancel sync~ done
+ - ~releases~ done
  - list --status --tree
  - --tidy: - find directories not part of remote
- - graceful shutdown - "index.lock exists Another git process seems to be running in this repository"
+ - more graceful shutdown - prevent locked repos "index.lock exists Another git process seems to be running in this repository"
  - oauth2 authentication
  - `@latest` = the tag with the highest semver version
  - don't include skipped updates in stats
  - handle moved repos
+ - better tests
 
 ## Prior art and inspiration
  - https://gerrit.googlesource.com/git-repo
