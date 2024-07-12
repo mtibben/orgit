@@ -85,15 +85,15 @@ If you wish to use SSH transport instead of HTTPS, you can override the URL in y
 
 
 ## TODO: wanted features
- - ~--except-for or ignorefile~
+ - ~ignorefile like .gitignore~ done
+ - ~Ctrl-C to cancel sync~ done
  - list --status --tree
  - --tidy: - find directories not part of remote
  - graceful shutdown - "index.lock exists Another git process seems to be running in this repository"
  - oauth2 authentication
  - `@latest` = the tag with the highest semver version
  - don't include skipped updates in stats
- - Ctrl-C during sync should display errors. Or just print errors in realtime
-
+ - handle moved repos
 
 ## Prior art and inspiration
  - https://gerrit.googlesource.com/git-repo
