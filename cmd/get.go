@@ -227,12 +227,14 @@ func (c *getCmdContext) getDefaultBranchName() (string, error) {
 	return defaultBranch, nil
 }
 
-func (c *getCmdContext) isDetachedHead() bool {
+func (c *getCmdContext) isDetachedHead() (bool, error) {
 	out, err := c.doExec(`git rev-parse --abbrev-ref --symbolic-full-name HEAD`)
 	if err != nil {
-		panic(err)
+		if c.hasNoCommits() {
+			return false, errNoCommits
+		}
 	}
-	return out == "HEAD"
+	return out == "HEAD", nil
 }
 
 func (c *getCmdContext) isSymbolicRef(ref string) bool {
@@ -243,12 +245,12 @@ func (c *getCmdContext) isSymbolicRef(ref string) bool {
 func (c *getCmdContext) fixRemoteConfig(gitUrl *url.URL) error {
 	remoteOriginUrl, err := c.doExec(`git config --get remote.origin.url`)
 	if err != nil {
-		return err
+		return fmt.Errorf("error getting remote origin url: %w", err)
 	}
 	if remoteOriginUrl != gitUrl.String() {
 		err := c.echoEvalf(`git remote set-url origin %s`, gitUrl.String())
 		if err != nil {
-			return err
+			return fmt.Errorf("error setting remote origin url: %w", err)
 		}
 	}
 
@@ -265,8 +267,10 @@ func (c *getCmdContext) stash() error {
 		if c.hasNoCommits() {
 			return errNoCommits
 		}
+		return fmt.Errorf("error stashing uncommitted changes: %w", err)
 	}
-	return err
+
+	return nil
 }
 
 func (c *getCmdContext) isABranch(branchOrCommit string) bool {
@@ -280,45 +284,49 @@ func (c *getCmdContext) doUpdate(gitUrl *url.URL, branchOrCommit string) error {
 
 	err := c.fixRemoteConfig(gitUrl)
 	if err != nil {
-		return err
+		return fmt.Errorf("error fixing remote config: %w", err)
 	}
 
 	err = c.echoEvalf(`git fetch origin`)
 	if err != nil {
-		return err
+		return fmt.Errorf("error fetching origin: %w", err)
+	}
+
+	if c.hasNoCommits() {
+		return nil // nothing we can do on a repo without commits
 	}
 
 	if branchOrCommit == "" {
 		branchOrCommit, err = c.getDefaultBranchName()
-		if err == errNoCommits {
-			return nil // nothing we can do on a repo without commits
-		} else if err != nil {
-			return err
+		if err != nil {
+			return fmt.Errorf("error getting default branch name: %w", err)
 		}
 	}
 
 	// don't want to clobber a git repo in a detached state
-	if c.isDetachedHead() {
+	isDetachedHead, err := c.isDetachedHead()
+	if err != nil {
+		return fmt.Errorf("error checking if HEAD is detached: %w", err)
+	}
+	if isDetachedHead {
 		return fmt.Errorf("can't update '%s', HEAD is detached", c.WorkingDir)
 	}
 
 	// optimistically stash any uncommitted changes
 	err = c.stash()
-	if err == errNoCommits {
-		return nil // nothing we can do on a repo without commits
-	} else if err != nil {
-		return err
+	if err != nil {
+		return fmt.Errorf("error stashing: %w", err)
 	}
 
 	err = c.echoEvalf(`git checkout %s`, branchOrCommit)
 	if err != nil {
-		return err
+		return fmt.Errorf("error checking out branch '%s': %w", branchOrCommit, err)
 	}
 
 	if c.isABranch(branchOrCommit) {
 		err = c.echoEvalf(`git merge --ff-only @{u}`)
 		if err != nil {
-			return err
+			return fmt.Errorf("error fast-forwarding branch '%s': %w", branchOrCommit, err)
 		}
 	}
 	return nil
@@ -330,7 +338,7 @@ func (c *getCmdContext) doClone(gitUrl, branchOrCommit string) error {
 
 	err := c.echoEvalf(`git clone --recursive %s %s`, gitUrl, destinationDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("error cloning '%s' into '%s': %w", gitUrl, destinationDir, err)
 	}
 	if branchOrCommit != "" {
 		return c.echoEvalf(`git checkout %s`, branchOrCommit)

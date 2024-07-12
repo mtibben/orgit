@@ -5,14 +5,14 @@
 
 ## Why use `orgit`?
 
-`orgit` streamlines cloning repos to a consistent location, and keeping them up-to-date. It's useful for developers who work with many git repositories and GitHub or GitLab orgs.
+`orgit` streamlines cloning git repos to a consistent location, and keeping them up-to-date. It's useful for developers who work with a large number of repositories within GitHub or GitLab orgs.
 
 `orgit`'s goals:
-  * sensible defaults: so you can use it immediately without any special setup or config
   * minimal config: relies on the git CLI for all git operations, so all config that applies to git is respected
+  * sensible defaults: so you can use it immediately without any special setup or config
   * fast: uses concurrency wherever possible
   * small: a focussed feature-set, so it's easy to understand and use
-  * make it just work: interoperable with popular git hosting services GitHub and GitLab, support Gitlab Groups and nested repositories
+  * make it just work: interoperable with popular git hosting services
 
 
 ## How it works
@@ -20,7 +20,7 @@
 `orgit` organises your git repositories in your workspace directory in a tree structure that mirrors the URL structure of the remote git repository. For example, if you have a git repository with the URL `https://github.com/my-org/my-repo`, then `orgit` will clone it into `$ORGIT_WORKSPACE/github.com/my-org/my-repo`.
 
 There are three commands.
-- `orgit get REPO_URL@COMMIT` will clone a repository using the repo's web URL.
+- `orgit get REPO_URL@COMMIT` will clone a repository using the repo's HTTP URL.
 - `orgit sync ORG_URL` will recursively clone or pull all repositories using the GitHub or GitLab org, user or group URL.
 - `orgit list` will list all git repositories in the workspace.
 

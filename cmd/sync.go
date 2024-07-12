@@ -90,8 +90,10 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 
 	err = workerPool.Wait()
 	if err != nil {
-		return fmt.Errorf("Sync didn't fully complete")
+		return fmt.Errorf("Sync didn't fully complete: %w", err)
 	}
+
+	fmt.Println("done")
 
 	return nil
 }
@@ -152,7 +154,7 @@ func (p *syncReposWorkerPool) createJob(r remoteRepo) func(context.Context) erro
 			time.Sleep(100 * time.Millisecond)
 			p.progressWriter.Info(err.Error())
 		}
-		return err
+		return fmt.Errorf("error doing work: %w", err)
 	}
 }
 
@@ -188,7 +190,11 @@ func (p *syncReposWorkerPool) AddUrl(r remoteRepo) {
 func (p *syncReposWorkerPool) Wait() error {
 	close(p.remoteReposChan)
 	<-p.remoteReposChanFinished
-	return p.workerPool.Wait()
+	err := p.workerPool.Wait()
+	if err != nil {
+		return fmt.Errorf("couldn't sync all repos: %w", err)
+	}
+	return nil
 }
 
 func (p *syncReposWorkerPool) canIgnore(r remoteRepo) bool {
@@ -235,7 +241,7 @@ func (p *syncReposWorkerPool) doWork(r remoteRepo) error {
 			err := c.doUpdate(gitUrl, r.defaultBranch)
 			if err != nil {
 				p.progressWriter.EventSyncedRepoError(localDir)
-				return err
+				return fmt.Errorf("couldn't update '%s': %w", localDir, err)
 			}
 			p.progressWriter.EventUpdatedRepo(localDir)
 		} else {
@@ -246,7 +252,7 @@ func (p *syncReposWorkerPool) doWork(r remoteRepo) error {
 			err := c.doClone(gitUrl.String(), "")
 			if err != nil {
 				p.progressWriter.EventSyncedRepoError(localDir)
-				return err
+				return fmt.Errorf("couldn't clone '%s': %w", localDir, err)
 			}
 			p.progressWriter.EventClonedRepo(localDir)
 		} else {
@@ -260,7 +266,7 @@ func (p *syncReposWorkerPool) doWork(r remoteRepo) error {
 func (p *syncReposWorkerPool) archive(localDir string) error {
 	rel, err := filepath.Rel(getWorkspaceDir(), localDir)
 	if err != nil {
-		return err
+		return fmt.Errorf("couldn't get relative path for '%s': %w", localDir, err)
 	}
 	newArchivedDir := filepath.Join(getWorkspaceDir(), ".archive", rel)
 	if dirExists(newArchivedDir) {
@@ -271,14 +277,15 @@ func (p *syncReposWorkerPool) archive(localDir string) error {
 	if !dirExists(parentDir) {
 		err := os.MkdirAll(parentDir, 0755)
 		if err != nil {
-			return err
+			return fmt.Errorf("couldn't create parent dir '%s': %w", parentDir, err)
 		}
 	}
 
 	err = os.Rename(localDir, newArchivedDir)
-	if err == nil {
-		p.progressWriter.Info(fmt.Sprintf("Archived '%s' to '%s'", localDir, newArchivedDir))
+	if err != nil {
+		return fmt.Errorf("couldn't move '%s' to '%s': %w", localDir, newArchivedDir, err)
 	}
 
-	return err
+	p.progressWriter.Info(fmt.Sprintf("Archived '%s' to '%s'", localDir, newArchivedDir))
+	return nil
 }

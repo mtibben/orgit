@@ -27,7 +27,7 @@ func init() {
 	glabHosts := strings.Split(os.Getenv("GITLAB_HOSTS"), ",")
 	glabHosts = append(glabHosts, "gitlab.com")
 	slices.Sort(glabHosts)
-	slices.Compact(glabHosts)
+	glabHosts = slices.Compact(glabHosts)
 
 	for _, host := range glabHosts {
 		KnownGitProviders = append(KnownGitProviders, NewGitlabRepoProvider(host))
@@ -118,7 +118,7 @@ func (gh GithubRepoProvider) ListReposByUser(ctx context.Context, org string, in
 	for {
 		repos, resp, err := client.Repositories.ListByUser(ctx, org, opt)
 		if err != nil {
-			return err
+			return fmt.Errorf("error listing repos for user %s: %w", org, err)
 		}
 
 		for _, repo := range repos {
@@ -151,7 +151,7 @@ func (gh GithubRepoProvider) ListReposByOrg(ctx context.Context, org string, inc
 	for {
 		repos, resp, err := client.Repositories.ListByOrg(ctx, org, opt)
 		if err != nil {
-			return err
+			return fmt.Errorf("error listing repos for org %s: %w", org, err)
 		}
 
 		for _, repo := range repos {
@@ -205,7 +205,7 @@ func NewGitlabRepoProvider(host string) GitlabRepoProvider {
 	}
 }
 
-func (gl GitlabRepoProvider) getClient(ctx context.Context) (*gitlab.Client, error) {
+func (gl GitlabRepoProvider) getClient() (*gitlab.Client, error) {
 	gitlabToken := getNetrcPasswordForMachine(gl.host)
 	options := []gitlab.ClientOptionFunc{}
 
@@ -213,13 +213,18 @@ func (gl GitlabRepoProvider) getClient(ctx context.Context) (*gitlab.Client, err
 		options = append(options, gitlab.WithCustomLogger(log.New(os.Stderr, "", log.LstdFlags)))
 	}
 
-	return gitlab.NewClient(gitlabToken, options...)
+	client, err := gitlab.NewClient(gitlabToken, options...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating gitlab client: %w", err)
+	}
+
+	return client, nil
 }
 
 func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, cloneUrlFunc func(remoteRepo)) error {
-	client, err := gl.getClient(ctx)
+	client, err := gl.getClient()
 	if err != nil {
-		return err
+		return fmt.Errorf("error creating gitlab client: %w", err)
 	}
 
 	opt := gitlab.ListGroupProjectsOptions{
@@ -237,7 +242,7 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeA
 	}
 
 	// use a worker pool to pull down data from gitlab in parallel
-	gitlabRequestPool := pool.New().WithMaxGoroutines(3).WithContext(context.Background()).WithCancelOnError().WithFirstError()
+	gitlabRequestPool := pool.New().WithMaxGoroutines(3).WithContext(ctx).WithCancelOnError().WithFirstError()
 
 	noMoreResults := false
 	for {
@@ -245,7 +250,7 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeA
 		gitlabRequestPool.Go(func(ctx context.Context) error {
 			ps, resp, err := client.Groups.ListGroupProjects(org, &thisIterationOpt)
 			if err != nil {
-				return err
+				return fmt.Errorf("error listing repos for org %s: %w", org, err)
 			}
 
 			for _, p := range ps {
@@ -276,7 +281,7 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeA
 
 	err = gitlabRequestPool.Wait()
 	if err != nil {
-		return err
+		return fmt.Errorf("error waiting for gitlab requests to complete: %w", err)
 	}
 
 	return nil

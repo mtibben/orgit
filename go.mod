@@ -1,6 +1,6 @@
 module github.com/mtibben/orgit
 
-go 1.21.4
+go 1.22.5
 
 require (
 	github.com/egymgmbh/go-prefix-writer v0.0.0-20180609083313-7326ea162eca
