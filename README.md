@@ -30,9 +30,9 @@ Note that `orgit` always uses:
 
 ## Installing
 
-```shell
-go install github.com/mtibben/orgit@latest
-```
+Either
+ 1. download the latest release from the [releases page](https://github.com/mtibben/orgit/releases), or
+ 2. install using your go toolchain: `go install github.com/mtibben/orgit@latest`.
 
 
 ## Example use
