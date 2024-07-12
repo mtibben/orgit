@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var osUserHomeDir = os.UserHomeDir
+var osUserHomeDirFunc = os.UserHomeDir
 
 func mustParseGitRepo(s string) *url.URL {
 	u, err := url.Parse(s)

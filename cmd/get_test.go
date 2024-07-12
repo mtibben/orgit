@@ -22,7 +22,7 @@ func TestGetArgs(t *testing.T) {
 	}
 
 	for i, tt := range tableTests {
-		osUserHomeDir = func() (string, error) { return "/home/user", nil }
+		osUserHomeDirFunc = func() (string, error) { return "/home/user", nil }
 
 		projectUrl, commitOrBranch, err := parseArgsForGetCmd(tt.args)
 		if err != nil {

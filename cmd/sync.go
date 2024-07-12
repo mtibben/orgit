@@ -93,8 +93,6 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 		return fmt.Errorf("Sync didn't fully complete: %w", err)
 	}
 
-	fmt.Println("done")
-
 	return nil
 }
 
@@ -149,12 +147,14 @@ func (p *syncReposWorkerPool) createJob(r remoteRepo) func(context.Context) erro
 	return func(ctx context.Context) error {
 		err := p.doWork(r)
 		if err != nil {
-			// if Ctrl-C is used, 100s of errors can be printed.
-			// Adding a short delay allows us time to turn off info Info logging before printing the error
+			// if Ctrl-C is used, 100s of errors can be printed at once as the worker pool is cancelled
+			// Adding a short delay allows us time to turn off Info logging first
 			time.Sleep(100 * time.Millisecond)
 			p.progressWriter.Info(err.Error())
+			return fmt.Errorf("error doing work: %w", err)
 		}
-		return fmt.Errorf("error doing work: %w", err)
+
+		return nil
 	}
 }
 

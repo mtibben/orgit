@@ -33,7 +33,7 @@ func getWorkspaceDir() string {
 			return baseDirFromEnv
 		}
 
-		homedir, err := osUserHomeDir()
+		homedir, err := osUserHomeDirFunc()
 		if err != nil {
 			panic(err)
 		}
