@@ -58,10 +58,28 @@ func init() {
 }
 
 func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, loglevel string) error {
+	ctx, ctxCancel := context.WithCancel(ctx)
+
 	logger := NewProgressLogger(loglevel)
 	defer logger.EndProgressLine("done")
 
-	ctx = handleSigterm(ctx, logger)
+	workerPool := NewSyncReposWorkerPool(ctx, clone, update, archive, logger)
+
+	// channel to trigger cancellation
+	// try to shutdown gracefully by waiting for workers to finish
+	gracefulShutdownTrigger := make(chan os.Signal, 1)
+	go func() {
+		<-gracefulShutdownTrigger
+		logger.LogInfo = false
+		logger.EndProgressLine("cancelling...")
+		logger.LogRealtimeProgress = false
+		ctxCancel()           // cancel the context, closing the ctx.Done channel
+		_ = workerPool.Wait() // wait for all workers to finish
+		os.Exit(1)
+	}()
+
+	// catch Ctrl-C, SIGINT, SIGTERM, SIGQUIT and gracefully shutdown
+	signal.Notify(gracefulShutdownTrigger, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
 	org := ""
 	provider, err := RepoProviderFor(orgUrlStr)
@@ -81,7 +99,6 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 
 	localDir := getLocalDir(orgUrl)
 	logger.Info(fmt.Sprintf("Syncing to '%s'", localDir))
-	workerPool := NewSyncReposWorkerPool(ctx, clone, update, archive, logger)
 
 	err = provider.ListRepos(ctx, org, archive, workerPool.AddUrl)
 	if err != nil {
@@ -94,24 +111,6 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 	}
 
 	return nil
-}
-
-func handleSigterm(ctx context.Context, logger *ProgressLogger) context.Context {
-	var cancelFunc context.CancelFunc
-	ctx, cancelFunc = context.WithCancel(ctx)
-
-	shutdownListener := make(chan os.Signal, 1)
-	go func() {
-		<-shutdownListener
-		logger.LogInfo = false
-		logger.EndProgressLine("cancelling...")
-		cancelFunc()
-		os.Exit(1)
-	}()
-
-	signal.Notify(shutdownListener, os.Interrupt, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-
-	return ctx
 }
 
 type syncReposWorkerPool struct {
@@ -241,7 +240,7 @@ func (p *syncReposWorkerPool) doWork(r remoteRepo) error {
 			err := c.doUpdate(gitUrl, r.defaultBranch)
 			if err != nil {
 				p.progressWriter.EventSyncedRepoError(localDir)
-				return fmt.Errorf("couldn't update '%s': %w", localDir, err)
+				return fmt.Errorf("error updating: %w", err)
 			}
 			p.progressWriter.EventUpdatedRepo(localDir)
 		} else {
@@ -252,7 +251,7 @@ func (p *syncReposWorkerPool) doWork(r remoteRepo) error {
 			err := c.doClone(gitUrl.String(), "")
 			if err != nil {
 				p.progressWriter.EventSyncedRepoError(localDir)
-				return fmt.Errorf("couldn't clone '%s': %w", localDir, err)
+				return fmt.Errorf("error cloning: %w", err)
 			}
 			p.progressWriter.EventClonedRepo(localDir)
 		} else {

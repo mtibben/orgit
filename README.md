@@ -8,11 +8,11 @@
 `orgit` streamlines cloning git repos to a consistent location, and keeping them up-to-date. It's useful for developers who work with a large number of repositories within GitHub or GitLab orgs.
 
 `orgit`'s goals:
-  * minimal config: relies on the git CLI for all git operations, so all config that applies to git is respected
-  * sensible defaults: so you can use it immediately without any special setup or config
-  * fast: uses concurrency wherever possible
+  * sensible defaults: you can use it immediately without any special setup or config
+  * minimal config: it relies on the git CLI for all git operations, so all config that applies to git is respected
+  * fast: it uses concurrency wherever possible to parallise API and git operations
   * small: a focussed feature-set, so it's easy to understand and use
-  * make it just work: interoperable with popular git hosting services
+  * it just works: interoperable with popular git hosting services
 
 
 ## How it works
@@ -90,16 +90,17 @@ If you wish to use SSH transport instead of HTTPS, you can override the URL in y
 ```
 
 
-## TODO: wanted features
+## TODO wanted features for v1
  - ~ignorefile like .gitignore~ done
  - ~Ctrl-C to cancel sync~ done
  - ~releases~ done
+ - ~graceful shutdown~ done
+ - fix error stats on graceful shutdown. Race condition, need to synchronise cancel and progress printer
+ - don't include skipped updates in stats
  - list --status --tree
  - --tidy: - find directories not part of remote
- - more graceful shutdown - prevent locked repos "index.lock exists Another git process seems to be running in this repository"
  - oauth2 authentication
  - `@latest` = the tag with the highest semver version
- - don't include skipped updates in stats
  - handle moved repos
  - better tests
 

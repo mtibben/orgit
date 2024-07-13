@@ -116,29 +116,32 @@ func (gh GithubRepoProvider) ListReposByUser(ctx context.Context, org string, in
 		},
 	}
 	for {
-		repos, resp, err := client.Repositories.ListByUser(ctx, org, opt)
-		if err != nil {
-			return fmt.Errorf("error listing repos for user %s: %w", org, err)
-		}
-
-		for _, repo := range repos {
-			if repo.GetArchived() && !includeArchived {
-				continue
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("cancelled listing Github repos for user %s: %w", org, ctx.Err())
+		default:
+			repos, resp, err := client.Repositories.ListByUser(ctx, org, opt)
+			if err != nil {
+				return fmt.Errorf("error listing repos for user %s: %w", org, err)
 			}
-			r := remoteRepo{
-				cloneUrl:   repo.GetCloneURL(),
-				isArchived: repo.GetArchived(),
-			}
-			repoUrlCallback(r)
-		}
 
-		if resp.NextPage == 0 {
-			break
+			for _, repo := range repos {
+				if repo.GetArchived() && !includeArchived {
+					continue
+				}
+				r := remoteRepo{
+					cloneUrl:   repo.GetCloneURL(),
+					isArchived: repo.GetArchived(),
+				}
+				repoUrlCallback(r)
+			}
+
+			if resp.NextPage == 0 {
+				return nil
+			}
+			opt.Page = resp.NextPage
 		}
-		opt.Page = resp.NextPage
 	}
-
-	return nil
 }
 
 func (gh GithubRepoProvider) ListReposByOrg(ctx context.Context, org string, includeArchived bool, repoUrlCallback func(remoteRepo)) error {
@@ -149,29 +152,32 @@ func (gh GithubRepoProvider) ListReposByOrg(ctx context.Context, org string, inc
 		},
 	}
 	for {
-		repos, resp, err := client.Repositories.ListByOrg(ctx, org, opt)
-		if err != nil {
-			return fmt.Errorf("error listing repos for org %s: %w", org, err)
-		}
-
-		for _, repo := range repos {
-			if repo.GetArchived() && !includeArchived {
-				continue
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("cancelled listing Github repos for org %s: %w", org, ctx.Err())
+		default:
+			repos, resp, err := client.Repositories.ListByOrg(ctx, org, opt)
+			if err != nil {
+				return fmt.Errorf("error listing repos for org %s: %w", org, err)
 			}
-			r := remoteRepo{
-				cloneUrl:   repo.GetCloneURL(),
-				isArchived: repo.GetArchived(),
-			}
-			repoUrlCallback(r)
-		}
 
-		if resp.NextPage == 0 {
-			break
+			for _, repo := range repos {
+				if repo.GetArchived() && !includeArchived {
+					continue
+				}
+				r := remoteRepo{
+					cloneUrl:   repo.GetCloneURL(),
+					isArchived: repo.GetArchived(),
+				}
+				repoUrlCallback(r)
+			}
+
+			if resp.NextPage == 0 {
+				return nil
+			}
+			opt.Page = resp.NextPage
 		}
-		opt.Page = resp.NextPage
 	}
-
-	return nil
 }
 
 func getNetrcPasswordForMachine(machine string) string {
