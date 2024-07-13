@@ -1,11 +1,7 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
-# Make sure to check the documentation at https://goreleaser.com
-
-# The lines bellow are called `modelines`. See `:help modeline`
-# Feel free to remove those if you don't want/need to use them.
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 # vim: set ts=2 sw=2 tw=0 fo=cnqoj
 
+# Documentation at https://goreleaser.com
 before:
   hooks:
     - go mod tidy
@@ -31,9 +27,13 @@ changelog:
       - "^test:"
 
 release:
-  # Repo in which the release will be created.
-  # Default: extracted from the origin remote URL or empty if its private hosted.
   github:
     owner: mtibben
     name: orgit
   draft: true
+  header: |
+    ## Known Issues
+    On macOS you may need to remove the quarantined bit to allow you to run the binary
+    ```
+    xattr -r -d com.apple.quarantine ~/Downloads/orgit
+    ```
