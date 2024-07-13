@@ -39,7 +39,7 @@ Either
 
 ```shell
 export ORGIT_WORKSPACE=~/Developer/src   # Set the orgit workspace. The orgit workspace is a directory that mirrors
-                                          # the remote repository URL structure.
+                                         # the remote repository URL structure.
 orgit get github.com/my-org/my-project   # Clone a repo into $ORGIT_WORKSPACE/github.com/my-org/my-project
 orgit sync github.com/my-org             # Clone all repos from the remote org in parallel
 orgit list                               # List all local repos in the workspace

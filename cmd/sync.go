@@ -90,7 +90,7 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 
 	err = workerPool.Wait()
 	if err != nil {
-		return fmt.Errorf("Sync didn't fully complete: %w", err)
+		return fmt.Errorf("Sync didn't fully complete")
 	}
 
 	return nil
