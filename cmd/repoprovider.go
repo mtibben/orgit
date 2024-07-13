@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/google/go-github/v57/github"
-	"github.com/jdxcode/netrc"
+	netrc "github.com/jdx/go-netrc"
 	"github.com/sourcegraph/conc/pool"
 	gitlab "github.com/xanzy/go-gitlab"
 )

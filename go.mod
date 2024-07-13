@@ -6,7 +6,7 @@ require (
 	github.com/egymgmbh/go-prefix-writer v0.0.0-20180609083313-7326ea162eca
 	github.com/fatih/color v1.17.0
 	github.com/google/go-github/v57 v57.0.0
-	github.com/jdxcode/netrc v1.0.0
+	github.com/jdx/go-netrc v1.0.1-0.20230828005321-03cfd6a9d2ac
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	github.com/sourcegraph/conc v0.3.0
 	github.com/spf13/cobra v1.8.1
