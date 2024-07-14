@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -38,7 +39,7 @@ type RepoProvider interface {
 	IsMatch(s string) bool
 	NormaliseGitUrl(s string) string
 	GetOrgFromUrl(orgUrl string) (string, error)
-	ListRepos(ctx context.Context, org string, includeArchived bool, repoUrlCallback func(remoteRepo)) error
+	ListRepos(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error
 }
 
 func RepoProviderFor(s string) (RepoProvider, error) {
@@ -98,17 +99,17 @@ func (gh GithubRepoProvider) getClient(ctx context.Context) *github.Client {
 	return github.NewClient(nil)
 }
 
-func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, repoUrlCallback func(remoteRepo)) error {
+func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
 	client := gh.getClient(ctx)
 	_, _, err := client.Organizations.Get(ctx, org)
 	if err == nil {
-		return gh.ListReposByOrg(ctx, org, includeArchived, repoUrlCallback)
+		return gh.ListReposByOrg(ctx, org, includeArchived, remoteRepoChan)
 	}
 
-	return gh.ListReposByUser(ctx, org, includeArchived, repoUrlCallback)
+	return gh.ListReposByUser(ctx, org, includeArchived, remoteRepoChan)
 }
 
-func (gh GithubRepoProvider) ListReposByUser(ctx context.Context, org string, includeArchived bool, repoUrlCallback func(remoteRepo)) error {
+func (gh GithubRepoProvider) ListReposByUser(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
 	client := gh.getClient(ctx)
 	opt := &github.RepositoryListByUserOptions{
 		ListOptions: github.ListOptions{
@@ -133,7 +134,7 @@ func (gh GithubRepoProvider) ListReposByUser(ctx context.Context, org string, in
 					cloneUrl:   repo.GetCloneURL(),
 					isArchived: repo.GetArchived(),
 				}
-				repoUrlCallback(r)
+				remoteRepoChan <- r
 			}
 
 			if resp.NextPage == 0 {
@@ -144,7 +145,7 @@ func (gh GithubRepoProvider) ListReposByUser(ctx context.Context, org string, in
 	}
 }
 
-func (gh GithubRepoProvider) ListReposByOrg(ctx context.Context, org string, includeArchived bool, repoUrlCallback func(remoteRepo)) error {
+func (gh GithubRepoProvider) ListReposByOrg(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
 	client := gh.getClient(ctx)
 	opt := &github.RepositoryListByOrgOptions{
 		ListOptions: github.ListOptions{
@@ -169,7 +170,7 @@ func (gh GithubRepoProvider) ListReposByOrg(ctx context.Context, org string, inc
 					cloneUrl:   repo.GetCloneURL(),
 					isArchived: repo.GetArchived(),
 				}
-				repoUrlCallback(r)
+				remoteRepoChan <- r
 			}
 
 			if resp.NextPage == 0 {
@@ -227,33 +228,41 @@ func (gl GitlabRepoProvider) getClient() (*gitlab.Client, error) {
 	return client, nil
 }
 
-func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, cloneUrlFunc func(remoteRepo)) error {
+func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
 	client, err := gl.getClient()
 	if err != nil {
 		return fmt.Errorf("error creating gitlab client: %w", err)
 	}
 
+	err = gl.ListReposByOrg(ctx, client, org, includeArchived, remoteRepoChan)
+	if errors.Is(err, gitlab.ErrNotFound) {
+		return gl.ListReposByUser(ctx, client, org, includeArchived, remoteRepoChan)
+	}
+
+	return err
+}
+
+func (gl GitlabRepoProvider) ListReposByOrg(ctx context.Context, client *gitlab.Client, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
 	opt := gitlab.ListGroupProjectsOptions{
-		ListOptions: gitlab.ListOptions{
-			PerPage: apiPageSize,
-			OrderBy: "id",
-			Sort:    "desc", // newest first, older repos have more chance of being archived
-			Page:    1,
-		},
-		IncludeSubGroups: gitlab.Ptr(true),
+		ListOptions:      defaultGitlabListOptions,
 		MinAccessLevel:   gitlab.Ptr(gitlab.DeveloperPermissions),
+		IncludeSubGroups: gitlab.Ptr(true),
 	}
 	if !includeArchived {
 		opt.Archived = gitlab.Ptr(false)
 	}
 
-	// use a worker pool to pull down data from gitlab in parallel
-	gitlabRequestPool := pool.New().WithMaxGoroutines(3).WithContext(ctx).WithCancelOnError().WithFirstError()
+	gitlabRequestPool := gl.newListReposWorkerPool(ctx)
 
 	noMoreResults := false
-	for {
+	contextCancelled := false
+	for ; !contextCancelled && !noMoreResults; opt.Page++ {
 		thisIterationOpt := opt
 		gitlabRequestPool.Go(func(ctx context.Context) error {
+			if ctx.Err() != nil {
+				contextCancelled = true
+				return fmt.Errorf("context cancelled, not making request: %w", ctx.Err())
+			}
 			ps, resp, err := client.Groups.ListGroupProjects(org, &thisIterationOpt)
 			if err != nil {
 				return fmt.Errorf("error listing repos for org %s: %w", org, err)
@@ -269,7 +278,7 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeA
 					isArchived:    p.Archived,
 					defaultBranch: p.DefaultBranch,
 				}
-				cloneUrlFunc(r)
+				remoteRepoChan <- r
 			}
 
 			if resp.NextPage == 0 {
@@ -278,16 +287,77 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeA
 
 			return nil
 		})
-		opt.Page++
-
-		if noMoreResults {
-			break
-		}
 	}
 
-	err = gitlabRequestPool.Wait()
+	err := gitlabRequestPool.Wait()
 	if err != nil {
-		return fmt.Errorf("error waiting for gitlab requests to complete: %w", err)
+		return fmt.Errorf("error during gitlab request: %w", err)
+	}
+
+	return nil
+}
+
+var defaultGitlabListOptions = gitlab.ListOptions{
+	PerPage: apiPageSize,
+	OrderBy: "id",
+	Sort:    "desc", // newest first, older repos have more chance of being archived
+	Page:    1,
+}
+
+// use a pool of 3 workers to pull down data from gitlab
+func (gl GitlabRepoProvider) newListReposWorkerPool(ctx context.Context) *pool.ContextPool {
+	return pool.New().WithMaxGoroutines(3).WithContext(ctx).WithCancelOnError().WithFirstError()
+}
+
+func (gl GitlabRepoProvider) ListReposByUser(ctx context.Context, client *gitlab.Client, user string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
+	opt := gitlab.ListProjectsOptions{
+		ListOptions:    defaultGitlabListOptions,
+		MinAccessLevel: gitlab.Ptr(gitlab.DeveloperPermissions),
+	}
+	if !includeArchived {
+		opt.Archived = gitlab.Ptr(false)
+	}
+
+	gitlabRequestPool := gl.newListReposWorkerPool(ctx)
+
+	noMoreResults := false
+	contextCancelled := false
+	for ; !contextCancelled && !noMoreResults; opt.Page++ {
+		thisIterationOpt := opt
+		gitlabRequestPool.Go(func(ctx context.Context) error {
+			if ctx.Err() != nil {
+				return fmt.Errorf("context cancelled, not making request: %w", ctx.Err())
+			}
+			ps, resp, err := client.Projects.ListUserProjects(user, &thisIterationOpt)
+			if err != nil {
+				return fmt.Errorf("error listing repos for user %s: %w", user, err)
+			}
+
+			for _, p := range ps {
+				if p.RepositoryAccessLevel == "disabled" {
+					continue
+				}
+
+				r := remoteRepo{
+					cloneUrl:      p.HTTPURLToRepo,
+					isArchived:    p.Archived,
+					defaultBranch: p.DefaultBranch,
+				}
+
+				remoteRepoChan <- r
+			}
+
+			if resp.NextPage == 0 {
+				noMoreResults = true
+			}
+
+			return nil
+		})
+	}
+
+	err := gitlabRequestPool.Wait()
+	if err != nil {
+		return fmt.Errorf("error during gitlab request: %w", err)
 	}
 
 	return nil

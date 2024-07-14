@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-	"time"
 
 	ignore "github.com/sabhiram/go-gitignore"
 	"github.com/sourcegraph/conc/pool"
@@ -82,7 +81,7 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 	signal.Notify(gracefulShutdownTrigger, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
 	org := ""
-	provider, err := RepoProviderFor(orgUrlStr)
+	repoProvider, err := RepoProviderFor(orgUrlStr)
 	if err != nil {
 		return fmt.Errorf("couldn't find provider for '%s': %w", orgUrlStr, err)
 	}
@@ -92,7 +91,7 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 		return fmt.Errorf("couldn't parse '%s': %w", orgUrlStr, err)
 	}
 
-	org, err = provider.GetOrgFromUrl(orgUrlStr)
+	org, err = repoProvider.GetOrgFromUrl(orgUrlStr)
 	if err != nil {
 		return fmt.Errorf("couldn't get org from '%s': %w", orgUrlStr, err)
 	}
@@ -100,7 +99,8 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 	localDir := getLocalDir(orgUrl)
 	logger.Info(fmt.Sprintf("Syncing to '%s'", localDir))
 
-	err = provider.ListRepos(ctx, org, archive, workerPool.AddUrl)
+	err = repoProvider.ListRepos(ctx, org, archive, workerPool.remoteReposChan)
+	close(workerPool.remoteReposChan) // close the channel to signal that no more repos will be sent
 	if err != nil {
 		return fmt.Errorf("couldn't list repos for '%s': %w", orgUrlStr, err)
 	}
@@ -124,17 +124,18 @@ type syncReposWorkerPool struct {
 	remoteReposChanFinished chan bool
 }
 
-const MaxGoroutines = 100
+const SyncWorkerPoolSize = 100
+const RemoteReposChannelSize = SyncWorkerPoolSize * 20 // buffer 20 repos per worker
 
 func NewSyncReposWorkerPool(ctx context.Context, clone, update, archive bool, progressWriter *ProgressLogger) *syncReposWorkerPool {
 	p := &syncReposWorkerPool{
-		workerPool:              pool.New().WithMaxGoroutines(MaxGoroutines).WithContext(ctx),
+		workerPool:              pool.New().WithMaxGoroutines(SyncWorkerPoolSize).WithContext(ctx),
 		cloneRepos:              clone,
 		updateRepos:             update,
 		archiveRepos:            archive,
 		progressWriter:          progressWriter,
-		ignore:                  getIgnore(),
-		remoteReposChan:         make(chan remoteRepo, MaxGoroutines*5),
+		ignore:                  getIgnorePatterns(),
+		remoteReposChan:         make(chan remoteRepo, RemoteReposChannelSize),
 		remoteReposChanFinished: make(chan bool),
 	}
 
@@ -146,9 +147,6 @@ func (p *syncReposWorkerPool) createJob(r remoteRepo) func(context.Context) erro
 	return func(ctx context.Context) error {
 		err := p.doWork(r)
 		if err != nil {
-			// if Ctrl-C is used, 100s of errors can be printed at once as the worker pool is cancelled
-			// Adding a short delay allows us time to turn off Info logging first
-			time.Sleep(100 * time.Millisecond)
 			p.progressWriter.Info(err.Error())
 			return fmt.Errorf("error doing work: %w", err)
 		}
@@ -159,6 +157,12 @@ func (p *syncReposWorkerPool) createJob(r remoteRepo) func(context.Context) erro
 
 func (p *syncReposWorkerPool) startRemoteReposChanListener() {
 	for r := range p.remoteReposChan {
+		if p.canIgnore(r) {
+			continue
+		}
+		p.progressWriter.AddTotalToProgress(1)
+
+		// start a new goroutine for each job
 		p.workerPool.Go(p.createJob(r))
 	}
 	p.remoteReposChanFinished <- true
@@ -178,17 +182,9 @@ type remoteRepo struct {
 	defaultBranch string
 }
 
-func (p *syncReposWorkerPool) AddUrl(r remoteRepo) {
-	if p.canIgnore(r) {
-		return
-	}
-	p.progressWriter.AddTotalToProgress(1)
-	p.remoteReposChan <- r
-}
-
 func (p *syncReposWorkerPool) Wait() error {
-	close(p.remoteReposChan)
 	<-p.remoteReposChanFinished
+
 	err := p.workerPool.Wait()
 	if err != nil {
 		return fmt.Errorf("couldn't sync all repos: %w", err)

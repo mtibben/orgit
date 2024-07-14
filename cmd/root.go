@@ -18,7 +18,7 @@ func fileExists(path string) bool {
 	return !info.IsDir()
 }
 
-func getIgnore() *ignore.GitIgnore {
+func getIgnorePatterns() *ignore.GitIgnore {
 	i, err := ignore.CompileIgnoreFile(filepath.Join(getWorkspaceDir(), ".orgitignore"))
 	if err != nil {
 		return ignore.CompileIgnoreLines()
