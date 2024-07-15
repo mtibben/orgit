@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -56,25 +57,42 @@ func init() {
 	rootCmd.AddCommand(cmdSync)
 }
 
-func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, loglevel string) error {
+func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, loglevel string) (err error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 
 	logger := NewProgressLogger(loglevel)
 	defer logger.EndProgressLine("done")
 
 	workerPool := NewSyncReposWorkerPool(ctx, clone, update, archive, logger)
+	defer func() {
+		werr := workerPool.Wait()
+		if werr != nil {
+			logger.Info("Sync didn't fully complete")
+		}
+		if err == nil {
+			err = werr
+		}
+	}()
 
 	// channel to trigger cancellation
 	// try to shutdown gracefully by waiting for workers to finish
 	gracefulShutdownTrigger := make(chan os.Signal, 1)
+	inShutdown := false
 	go func() {
 		<-gracefulShutdownTrigger
-		logger.LogInfo = false
-		logger.EndProgressLine("cancelling...")
-		logger.LogRealtimeProgress = false
+		inShutdown = true
+		logger.EndProgressLine("cancelled")
+		logger.Info("Aborting sync...")
 		ctxCancel()           // cancel the context, closing the ctx.Done channel
 		_ = workerPool.Wait() // wait for all workers to finish
 		os.Exit(1)
+	}()
+
+	defer func() {
+		// wait for graceful shutdown goroutine to exit for us
+		if inShutdown {
+			<-gracefulShutdownTrigger
+		}
 	}()
 
 	// catch Ctrl-C, SIGINT, SIGTERM, SIGQUIT and gracefully shutdown
@@ -101,16 +119,11 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 
 	err = repoProvider.ListRepos(ctx, org, archive, workerPool.remoteReposChan)
 	close(workerPool.remoteReposChan) // close the channel to signal that no more repos will be sent
-	if err != nil {
-		return fmt.Errorf("couldn't list repos for '%s': %w", orgUrlStr, err)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		err = fmt.Errorf("couldn't list repos for '%s': %w", orgUrlStr, err)
 	}
 
-	err = workerPool.Wait()
-	if err != nil {
-		return fmt.Errorf("Sync didn't fully complete")
-	}
-
-	return nil
+	return err
 }
 
 type syncReposWorkerPool struct {
@@ -147,7 +160,7 @@ func (p *syncReposWorkerPool) createJob(r remoteRepo) func(context.Context) erro
 	return func(ctx context.Context) error {
 		err := p.doWork(r)
 		if err != nil {
-			p.progressWriter.Info(err.Error())
+			p.progressWriter.InfoWithSignalInteruptRaceDelay(ctx, err.Error())
 			return fmt.Errorf("error doing work: %w", err)
 		}
 

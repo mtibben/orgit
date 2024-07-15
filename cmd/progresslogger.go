@@ -1,12 +1,15 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/egymgmbh/go-prefix-writer/prefixer"
 	"github.com/fatih/color"
@@ -139,20 +142,47 @@ func (p *ProgressLogger) EventClonedRepo(localDir string) {
 func (p *ProgressLogger) EndProgressLine(doneMsg string) {
 	p.doneMsg = fmt.Sprintf(" %s\n", doneMsg)
 	p.PrintProgressLine()
+	p.LogRealtimeProgress = false
 	p.stateProgressLineRunning = false
 }
 
-func (p *ProgressLogger) Info(s string) {
-	if p.LogInfo {
-		firstChar := ""
-		lastChar := ""
-		if p.stateProgressLineRunning {
-			firstChar = ansiClearLine
-			lastChar = ansiSaveCursorPosition
+// InfoWithSignalInteruptRaceDelay is a special case of Info that is used to print
+// a message that might be interrupted by a signal interrupt. If the message
+// is a signal interrupt message, it will delay the message by 1s to avoid
+// prematurely spamming the terminal with multiple signal interrupt messages.
+func (p *ProgressLogger) InfoWithSignalInteruptRaceDelay(ctx context.Context, s string) {
+	if strings.HasSuffix(s, "signal: interrupt") {
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return
 		}
-		p.Printer.Printf("%s%s\n%s", firstChar, s, lastChar)
-		p.PrintProgressLine()
+
+		go func(s string) {
+			time.Sleep(1 * time.Second)
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return
+			}
+			p.Info(s)
+		}(s)
+
+		return
 	}
+
+	p.Info(s)
+}
+
+func (p *ProgressLogger) Info(s string) {
+	if !p.LogInfo {
+		return
+	}
+
+	firstChar := ""
+	lastChar := ""
+	if p.stateProgressLineRunning {
+		firstChar = ansiClearLine
+		lastChar = ansiSaveCursorPosition
+	}
+	p.Printer.Printf("%s%s\n%s", firstChar, s, lastChar)
+	p.PrintProgressLine()
 }
 
 func (p *ProgressLogger) PrintProgressLine() {
