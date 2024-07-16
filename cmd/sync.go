@@ -74,25 +74,24 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 		}
 	}()
 
+	isShuttingDown := false
+	defer func() {
+		if isShuttingDown {
+			select {} // block forever so that the graceful shutdown can complete
+		}
+	}()
+
 	// channel to trigger cancellation
 	// try to shutdown gracefully by waiting for workers to finish
 	gracefulShutdownTrigger := make(chan os.Signal, 1)
-	inShutdown := false
 	go func() {
 		<-gracefulShutdownTrigger
-		inShutdown = true
+		isShuttingDown = true
 		logger.EndProgressLine("cancelled")
 		logger.Info("Aborting sync...")
 		ctxCancel()           // cancel the context, closing the ctx.Done channel
 		_ = workerPool.Wait() // wait for all workers to finish
 		os.Exit(1)
-	}()
-
-	defer func() {
-		// wait for graceful shutdown goroutine to exit for us
-		if inShutdown {
-			<-gracefulShutdownTrigger
-		}
 	}()
 
 	// catch Ctrl-C, SIGINT, SIGTERM, SIGQUIT and gracefully shutdown
@@ -158,6 +157,10 @@ func NewSyncReposWorkerPool(ctx context.Context, clone, update, archive bool, pr
 
 func (p *syncReposWorkerPool) createJob(r remoteRepo) func(context.Context) error {
 	return func(ctx context.Context) error {
+		if ctx.Err() == context.Canceled {
+			return ctx.Err()
+		}
+
 		err := p.doWork(r)
 		if err != nil {
 			p.progressWriter.InfoWithSignalInteruptRaceDelay(ctx, err.Error())
