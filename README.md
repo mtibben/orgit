@@ -95,13 +95,13 @@ If you wish to use SSH transport instead of HTTPS, you can override the URL in y
  - ~Ctrl-C to cancel sync~ done
  - ~releases~ done
  - ~graceful shutdown~ done
- - fix error stats on graceful shutdown. Race condition, need to synchronise cancel and progress printer
+ - ~fix error stats on graceful shutdown. Race condition, need to synchronise cancel and progress printer~
+ - ~--tidy: - find directories not part of remote~
+ - ~handle moved repos~
  - don't include skipped updates in stats
  - list --status --tree
- - --tidy: - find directories not part of remote
  - oauth2 authentication
  - `@latest` = the tag with the highest semver version
- - handle moved repos
  - better tests
 
 ## Prior art and inspiration

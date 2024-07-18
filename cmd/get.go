@@ -66,6 +66,10 @@ func parseArgsForGetCmd(projectUrl string) (gitUrl *url.URL, commitOrBranch stri
 	return gitUrl, commitOrBranch, nil
 }
 
+func getTrashDir() string {
+	return filepath.Join(getWorkspaceDir(), trashDir)
+}
+
 func getLocalDir(gitUrl *url.URL) string {
 	localDir := filepath.Join(getWorkspaceDir(), gitUrl.Host, gitUrl.Path)
 	localDir = strings.TrimSuffix(localDir, ".git")

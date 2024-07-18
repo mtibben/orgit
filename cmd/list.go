@@ -71,7 +71,7 @@ func init() {
 		Run: func(cmd *cobra.Command, args []string) {
 			baseDir := getWorkspaceDir()
 			if archived {
-				baseDir = filepath.Join(baseDir, ".archive")
+				baseDir = filepath.Join(baseDir, archiveDir)
 			}
 
 			wg := sync.WaitGroup{}

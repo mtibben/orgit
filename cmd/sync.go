@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
+	"sync"
 	"syscall"
 
 	ignore "github.com/sabhiram/go-gitignore"
@@ -16,12 +16,16 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var logLevel = "info"
+var logLevelFlag = "info"
+
+const archiveDir = ".archive"
+const trashDir = ".trash"
 
 func init() {
-	noClone := false
-	noUpdate := false
-	noArchive := false
+	noCloneFlag := false
+	noUpdateFlag := false
+	noArchiveFlag := false
+	tidyFlag := false
 
 	var cmdSync = &cobra.Command{
 		Use:   "sync [flags] ORG_URL",
@@ -34,7 +38,7 @@ func init() {
 `,
 		Run: func(cmd *cobra.Command, args []string) {
 			orgUrlArg := args[0]
-			err := doSync(cmd.Context(), orgUrlArg, !noClone, !noUpdate, !noArchive, logLevel)
+			err := doSync(cmd.Context(), orgUrlArg, !noCloneFlag, !noUpdateFlag, !noArchiveFlag, tidyFlag, logLevelFlag)
 			if err != nil {
 				fmt.Println(err)
 				os.Exit(1)
@@ -49,22 +53,23 @@ func init() {
 		},
 	}
 
-	cmdSync.Flags().BoolVar(&noClone, "no-clone", false, "Don't clone repos")
-	cmdSync.Flags().BoolVar(&noUpdate, "no-update", false, "Don't update repos")
-	cmdSync.Flags().BoolVar(&noArchive, "no-archive", false, "Don't archive repos")
-	cmdSync.Flags().StringVar(&logLevel, "log-level", "info", "Set the log level (debug, verbose, info, quiet)")
+	cmdSync.Flags().BoolVar(&noCloneFlag, "no-clone", false, "Don't clone repos")
+	cmdSync.Flags().BoolVar(&noUpdateFlag, "no-update", false, "Don't update repos")
+	cmdSync.Flags().BoolVar(&noArchiveFlag, "no-archive", false, "Don't archive repos to $ORGIT_WORSPACE/.archive")
+	cmdSync.Flags().BoolVar(&tidyFlag, "tidy", false, "Tidy up the workspace, moving repos missing on the remote to $ORGIT_WORSPACE/.trash")
+	cmdSync.Flags().StringVar(&logLevelFlag, "log-level", "info", "Set the log level (debug, verbose, info, quiet)")
 
 	rootCmd.AddCommand(cmdSync)
 }
 
-func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, loglevel string) (err error) {
+func doSync(ctx context.Context, orgUrlStr string, clone, update, archive, tidy bool, loglevel string) (err error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 
 	logger := NewProgressLogger(loglevel)
 	defer logger.EndProgressLine("done")
 
 	workerPool := NewSyncReposWorkerPool(ctx, clone, update, archive, logger)
-	defer func() {
+	var workerPoolWait = sync.OnceFunc(func() {
 		werr := workerPool.Wait()
 		if werr != nil {
 			logger.Info("Sync didn't fully complete")
@@ -72,57 +77,121 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive bool, 
 		if err == nil {
 			err = werr
 		}
-	}()
-
-	isShuttingDown := false
-	defer func() {
-		if isShuttingDown {
-			select {} // block forever so that the graceful shutdown can complete
-		}
-	}()
+	})
+	defer workerPoolWait()
 
 	// channel to trigger cancellation
 	// try to shutdown gracefully by waiting for workers to finish
 	gracefulShutdownTrigger := make(chan os.Signal, 1)
 	go func() {
 		<-gracefulShutdownTrigger
-		isShuttingDown = true
 		logger.EndProgressLine("cancelled")
 		logger.Info("Aborting sync...")
-		ctxCancel()           // cancel the context, closing the ctx.Done channel
-		_ = workerPool.Wait() // wait for all workers to finish
+		ctxCancel()      // cancel the context, closing the ctx.Done channel
+		workerPoolWait() // wait for all workers to finish
 		os.Exit(1)
 	}()
 
 	// catch Ctrl-C, SIGINT, SIGTERM, SIGQUIT and gracefully shutdown
 	signal.Notify(gracefulShutdownTrigger, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-	org := ""
 	repoProvider, err := RepoProviderFor(orgUrlStr)
 	if err != nil {
 		return fmt.Errorf("couldn't find provider for '%s': %w", orgUrlStr, err)
 	}
 
-	orgUrl, err := url.Parse(orgUrlStr)
+	repoPath, err := ParseRepoName(orgUrlStr)
 	if err != nil {
 		return fmt.Errorf("couldn't parse '%s': %w", orgUrlStr, err)
 	}
 
-	org, err = repoProvider.GetOrgFromUrl(orgUrlStr)
-	if err != nil {
-		return fmt.Errorf("couldn't get org from '%s': %w", orgUrlStr, err)
+	logger.Info(fmt.Sprintf("Syncing to '%s'", repoPath.LocalPathAbsolute()))
+
+	err = repoProvider.ListRepos(ctx, repoPath.Path, archive, workerPool.remoteReposChan)
+	close(workerPool.remoteReposChan) // close the channel to signal that no more repos will be sent
+
+	if tidy {
+		workerPoolWait()
+
+		tidier := TidyAction{
+			repoProvider: repoProvider,
+			localDir:     repoPath.LocalPathAbsolute(),
+			logger:       logger,
+		}
+
+		wg := sync.WaitGroup{}
+		forEachGitDirIn(repoPath.LocalPathAbsolute(), func(relativeDir string) {
+			repoNameString := filepath.Join(repoPath.String(), relativeDir)
+			reponame := MustParseRepoName(repoNameString)
+
+			if !workerPool.HasProcessedRepo(reponame.String()) {
+				wg.Add(1)
+				go func(reponame RepoName) {
+					defer wg.Done()
+
+					err := tidier.doTidy(ctx, reponame)
+					if err != nil {
+						logger.Info(err.Error())
+					}
+				}(reponame)
+			}
+		})
+		wg.Wait()
 	}
 
-	localDir := getLocalDir(orgUrl)
-	logger.Info(fmt.Sprintf("Syncing to '%s'", localDir))
-
-	err = repoProvider.ListRepos(ctx, org, archive, workerPool.remoteReposChan)
-	close(workerPool.remoteReposChan) // close the channel to signal that no more repos will be sent
 	if err != nil && !errors.Is(err, context.Canceled) {
 		err = fmt.Errorf("couldn't list repos for '%s': %w", orgUrlStr, err)
 	}
 
 	return err
+}
+
+func osMove(oldpath, newpath string) error {
+	err := os.MkdirAll(filepath.Dir(newpath), 0755)
+	if err != nil {
+		return fmt.Errorf("couldn't create parent dir: %w", err)
+	}
+	err = os.Rename(oldpath, newpath)
+	if err != nil {
+		return fmt.Errorf("couldn't move directory: %w", err)
+	}
+	return nil
+}
+
+type TidyAction struct {
+	repoProvider RepoProvider
+	localDir     string
+	logger       *ProgressLogger
+}
+
+func (t *TidyAction) doTidy(ctx context.Context, oldRepoName RepoName) error {
+	newRepo, err := t.repoProvider.GetRepo(ctx, oldRepoName.Path)
+	if errors.Is(err, ErrRepoNotFound) {
+		trashDir := filepath.Join(getTrashDir(), oldRepoName.String())
+
+		err = osMove(oldRepoName.LocalPathAbsolute(), trashDir)
+		if err != nil {
+			return fmt.Errorf("couldn't move '%s' to '%s': %w", oldRepoName, trashDir, err)
+		}
+		t.logger.Info(fmt.Sprintf("Moved '%s' to '%s'", oldRepoName.LocalPathAbsolute(), trashDir))
+	} else if err != nil {
+		return fmt.Errorf("couldn't get repo '%s': %w", oldRepoName.String(), err)
+	} else if newRepo.RepoName.LocalPathAbsolute() != oldRepoName.LocalPathAbsolute() {
+		if dirExists(newRepo.RepoName.LocalPathAbsolute()) {
+			return fmt.Errorf("couldn't tidy '%s', dir '%s' already exists", oldRepoName.String(), newRepo.RepoName.LocalPathAbsolute())
+		}
+
+		err := osMove(oldRepoName.LocalPathAbsolute(), newRepo.RepoName.LocalPathAbsolute())
+		if err != nil {
+			return fmt.Errorf("couldn't move '%s' to '%s': %w", oldRepoName.LocalPathAbsolute(), newRepo.RepoName.LocalPathAbsolute(), err)
+		}
+
+		t.logger.Info(fmt.Sprintf("Moved '%s' to '%s'", oldRepoName.LocalPathAbsolute(), newRepo.RepoName.LocalPathAbsolute()))
+	} else {
+		return fmt.Errorf("Expected new repo to have a different local dir: " + newRepo.RepoName.LocalPathAbsolute())
+	}
+
+	return nil
 }
 
 type syncReposWorkerPool struct {
@@ -132,8 +201,10 @@ type syncReposWorkerPool struct {
 	updateRepos             bool
 	archiveRepos            bool
 	ignore                  *ignore.GitIgnore
-	remoteReposChan         chan remoteRepo
+	remoteReposChan         chan RemoteRepo
 	remoteReposChanFinished chan bool
+
+	remoteRepos sync.Map
 }
 
 const SyncWorkerPoolSize = 100
@@ -147,19 +218,30 @@ func NewSyncReposWorkerPool(ctx context.Context, clone, update, archive bool, pr
 		archiveRepos:            archive,
 		progressWriter:          progressWriter,
 		ignore:                  getIgnorePatterns(),
-		remoteReposChan:         make(chan remoteRepo, RemoteReposChannelSize),
+		remoteReposChan:         make(chan RemoteRepo, RemoteReposChannelSize),
 		remoteReposChanFinished: make(chan bool),
+		remoteRepos:             sync.Map{},
 	}
 
 	go p.startRemoteReposChanListener()
 	return p
 }
 
-func (p *syncReposWorkerPool) createJob(r remoteRepo) func(context.Context) error {
+func (p *syncReposWorkerPool) HasProcessedRepo(repoName string) bool {
+	_, ok := p.remoteRepos.Load(repoName)
+	return ok
+}
+
+func (p *syncReposWorkerPool) createJob(r RemoteRepo) func(context.Context) error {
+	if r.RepoName.String() == "" {
+		panic("RepoName is empty")
+	}
 	return func(ctx context.Context) error {
 		if ctx.Err() == context.Canceled {
 			return ctx.Err()
 		}
+
+		p.remoteRepos.Store(r.RepoName.String(), r)
 
 		err := p.doWork(r)
 		if err != nil {
@@ -184,22 +266,20 @@ func (p *syncReposWorkerPool) startRemoteReposChanListener() {
 	p.remoteReposChanFinished <- true
 }
 
-func cleanName(s string) string {
-	s = strings.TrimPrefix(s, "https://")
-	s = strings.TrimPrefix(s, "http://")
-	s = strings.TrimSuffix(s, ".git")
-
-	return s
+func (p *syncReposWorkerPool) waitForRemoteReposChan() {
+	<-p.remoteReposChanFinished
+	close(p.remoteReposChanFinished)
 }
 
-type remoteRepo struct {
-	cloneUrl      string
-	isArchived    bool
-	defaultBranch string
+type RemoteRepo struct {
+	RepoName      RepoName
+	CloneUrl      string
+	IsArchived    bool
+	DefaultBranch string
 }
 
 func (p *syncReposWorkerPool) Wait() error {
-	<-p.remoteReposChanFinished
+	p.waitForRemoteReposChan()
 
 	err := p.workerPool.Wait()
 	if err != nil {
@@ -208,22 +288,22 @@ func (p *syncReposWorkerPool) Wait() error {
 	return nil
 }
 
-func (p *syncReposWorkerPool) canIgnore(r remoteRepo) bool {
-	cleanRepoName := cleanName(r.cloneUrl)
-	if p.ignore.MatchesPath(cleanRepoName) {
-		p.progressWriter.EventIgnoredRepo(cleanRepoName)
+func (p *syncReposWorkerPool) canIgnore(r RemoteRepo) bool {
+	cleanRepoName := MustParseRepoName(r.CloneUrl)
+	if p.ignore.MatchesPath(cleanRepoName.String()) {
+		p.progressWriter.EventIgnoredRepo(cleanRepoName.String())
 		return true
 	}
 
 	return false
 }
 
-func (p *syncReposWorkerPool) doWork(r remoteRepo) error {
-	gitUrl, _ := url.Parse(r.cloneUrl)
+func (p *syncReposWorkerPool) doWork(r RemoteRepo) error {
+	gitUrl, _ := url.Parse(r.CloneUrl)
 	localDir := getLocalDir(gitUrl)
 	localDirExists := dirExists(localDir)
 
-	if r.isArchived {
+	if r.IsArchived {
 		if localDirExists {
 			if p.archiveRepos {
 				err := p.archive(localDir)
@@ -249,7 +329,7 @@ func (p *syncReposWorkerPool) doWork(r remoteRepo) error {
 	}
 	if localDirExists {
 		if p.updateRepos {
-			err := c.doUpdate(gitUrl, r.defaultBranch)
+			err := c.doUpdate(gitUrl, r.DefaultBranch)
 			if err != nil {
 				p.progressWriter.EventSyncedRepoError(localDir)
 				return fmt.Errorf("error updating: %w", err)
@@ -279,7 +359,7 @@ func (p *syncReposWorkerPool) archive(localDir string) error {
 	if err != nil {
 		return fmt.Errorf("couldn't get relative path for '%s': %w", localDir, err)
 	}
-	newArchivedDir := filepath.Join(getWorkspaceDir(), ".archive", rel)
+	newArchivedDir := filepath.Join(getWorkspaceDir(), archiveDir, rel)
 	if dirExists(newArchivedDir) {
 		return fmt.Errorf("can't archive '%s', dir '%s' already exists", localDir, newArchivedDir)
 	}

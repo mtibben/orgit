@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -24,6 +23,8 @@ var KnownGitProviders = []RepoProvider{
 	NewGithubRepoProvider(),
 }
 
+var ErrRepoNotFound = errors.New("repo not found")
+
 func init() {
 	glabHosts := strings.Split(os.Getenv("GITLAB_HOSTS"), ",")
 	glabHosts = append(glabHosts, "gitlab.com")
@@ -38,8 +39,8 @@ func init() {
 type RepoProvider interface {
 	IsMatch(s string) bool
 	NormaliseGitUrl(s string) string
-	GetOrgFromUrl(orgUrl string) (string, error)
-	ListRepos(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error
+	ListRepos(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan RemoteRepo) error
+	GetRepo(ctx context.Context, repoName string) (RemoteRepo, error)
 }
 
 func RepoProviderFor(s string) (RepoProvider, error) {
@@ -55,7 +56,6 @@ type genericRepoProvider struct {
 	prefix       string
 	appendPrefix string
 	appendSuffix string
-	orgRegexp    *regexp.Regexp
 }
 
 func (p genericRepoProvider) IsMatch(s string) bool {
@@ -64,14 +64,6 @@ func (p genericRepoProvider) IsMatch(s string) bool {
 
 func (p genericRepoProvider) NormaliseGitUrl(s string) string {
 	return p.appendPrefix + s + p.appendSuffix
-}
-
-func (p genericRepoProvider) GetOrgFromUrl(orgUrlArg string) (string, error) {
-	orgIndex := p.orgRegexp.SubexpIndex("org")
-	if orgIndex == -1 {
-		return "", fmt.Errorf("invalid org url '%s", orgUrlArg)
-	}
-	return p.orgRegexp.FindStringSubmatch(orgUrlArg)[orgIndex], nil
 }
 
 type GithubRepoProvider struct {
@@ -84,7 +76,6 @@ func NewGithubRepoProvider() GithubRepoProvider {
 			prefix:       "github.com/",
 			appendPrefix: "https://",
 			appendSuffix: ".git",
-			orgRegexp:    regexp.MustCompile("(https?://)?github.com/(?P<org>[^/]+)"),
 		},
 	}
 }
@@ -99,7 +90,30 @@ func (gh GithubRepoProvider) getClient(ctx context.Context) *github.Client {
 	return github.NewClient(nil)
 }
 
-func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
+func (gh GithubRepoProvider) GetRepo(ctx context.Context, repoUrl string) (RemoteRepo, error) {
+	client := gh.getClient(ctx)
+	repoParts := strings.Split(repoUrl, "/")
+	if len(repoParts) < 2 {
+		return RemoteRepo{}, fmt.Errorf("invalid github repo url '%s'", repoUrl)
+	}
+
+	owner := repoParts[len(repoParts)-2]
+	repo := repoParts[len(repoParts)-1]
+
+	r, _, err := client.Repositories.Get(ctx, owner, repo)
+	if err != nil {
+		return RemoteRepo{}, fmt.Errorf("error getting repo %s/%s: %w", owner, repo, err)
+	}
+
+	return RemoteRepo{
+		RepoName:      MustParseRepoName(r.GetURL()),
+		CloneUrl:      r.GetCloneURL(),
+		IsArchived:    r.GetArchived(),
+		DefaultBranch: r.GetDefaultBranch(),
+	}, nil
+}
+
+func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan RemoteRepo) error {
 	client := gh.getClient(ctx)
 	_, _, err := client.Organizations.Get(ctx, org)
 	if err == nil {
@@ -109,7 +123,7 @@ func (gh GithubRepoProvider) ListRepos(ctx context.Context, org string, includeA
 	return gh.ListReposByUser(ctx, org, includeArchived, remoteRepoChan)
 }
 
-func (gh GithubRepoProvider) ListReposByUser(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
+func (gh GithubRepoProvider) ListReposByUser(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan RemoteRepo) error {
 	client := gh.getClient(ctx)
 	opt := &github.RepositoryListByUserOptions{
 		ListOptions: github.ListOptions{
@@ -130,9 +144,11 @@ func (gh GithubRepoProvider) ListReposByUser(ctx context.Context, org string, in
 				if repo.GetArchived() && !includeArchived {
 					continue
 				}
-				r := remoteRepo{
-					cloneUrl:   repo.GetCloneURL(),
-					isArchived: repo.GetArchived(),
+				r := RemoteRepo{
+					RepoName:      MustParseRepoName(repo.GetURL()),
+					CloneUrl:      repo.GetCloneURL(),
+					IsArchived:    repo.GetArchived(),
+					DefaultBranch: repo.GetDefaultBranch(),
 				}
 				remoteRepoChan <- r
 			}
@@ -145,7 +161,7 @@ func (gh GithubRepoProvider) ListReposByUser(ctx context.Context, org string, in
 	}
 }
 
-func (gh GithubRepoProvider) ListReposByOrg(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
+func (gh GithubRepoProvider) ListReposByOrg(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan RemoteRepo) error {
 	client := gh.getClient(ctx)
 	opt := &github.RepositoryListByOrgOptions{
 		ListOptions: github.ListOptions{
@@ -166,9 +182,11 @@ func (gh GithubRepoProvider) ListReposByOrg(ctx context.Context, org string, inc
 				if repo.GetArchived() && !includeArchived {
 					continue
 				}
-				r := remoteRepo{
-					cloneUrl:   repo.GetCloneURL(),
-					isArchived: repo.GetArchived(),
+				r := RemoteRepo{
+					RepoName:      MustParseRepoName(repo.GetURL()),
+					CloneUrl:      repo.GetCloneURL(),
+					IsArchived:    repo.GetArchived(),
+					DefaultBranch: repo.GetDefaultBranch(),
 				}
 				remoteRepoChan <- r
 			}
@@ -206,7 +224,6 @@ func NewGitlabRepoProvider(host string) GitlabRepoProvider {
 			prefix:       fmt.Sprintf("%s/", host),
 			appendPrefix: "https://",
 			appendSuffix: ".git",
-			orgRegexp:    regexp.MustCompile(fmt.Sprintf("(https?://)?%s/(?P<org>.+)", host)),
 		},
 		host: host,
 	}
@@ -216,7 +233,7 @@ func (gl GitlabRepoProvider) getClient() (*gitlab.Client, error) {
 	gitlabToken := getNetrcPasswordForMachine(gl.host)
 	options := []gitlab.ClientOptionFunc{}
 
-	if logLevel == "debug" {
+	if logLevelFlag == "debug" {
 		options = append(options, gitlab.WithCustomLogger(log.New(os.Stderr, "", log.LstdFlags)))
 	}
 
@@ -228,7 +245,7 @@ func (gl GitlabRepoProvider) getClient() (*gitlab.Client, error) {
 	return client, nil
 }
 
-func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
+func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeArchived bool, remoteRepoChan chan RemoteRepo) error {
 	client, err := gl.getClient()
 	if err != nil {
 		return fmt.Errorf("error creating gitlab client: %w", err)
@@ -242,7 +259,7 @@ func (gl GitlabRepoProvider) ListRepos(ctx context.Context, org string, includeA
 	return err
 }
 
-func (gl GitlabRepoProvider) ListReposByOrg(ctx context.Context, client *gitlab.Client, org string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
+func (gl GitlabRepoProvider) ListReposByOrg(ctx context.Context, client *gitlab.Client, org string, includeArchived bool, remoteRepoChan chan RemoteRepo) error {
 	opt := gitlab.ListGroupProjectsOptions{
 		ListOptions:      defaultGitlabListOptions,
 		MinAccessLevel:   gitlab.Ptr(gitlab.DeveloperPermissions),
@@ -273,10 +290,11 @@ func (gl GitlabRepoProvider) ListReposByOrg(ctx context.Context, client *gitlab.
 					continue
 				}
 
-				r := remoteRepo{
-					cloneUrl:      p.HTTPURLToRepo,
-					isArchived:    p.Archived,
-					defaultBranch: p.DefaultBranch,
+				r := RemoteRepo{
+					RepoName:      MustParseRepoName(p.WebURL),
+					CloneUrl:      p.HTTPURLToRepo,
+					IsArchived:    p.Archived,
+					DefaultBranch: p.DefaultBranch,
 				}
 				remoteRepoChan <- r
 			}
@@ -309,7 +327,7 @@ func (gl GitlabRepoProvider) newListReposWorkerPool(ctx context.Context) *pool.C
 	return pool.New().WithMaxGoroutines(3).WithContext(ctx).WithCancelOnError().WithFirstError()
 }
 
-func (gl GitlabRepoProvider) ListReposByUser(ctx context.Context, client *gitlab.Client, user string, includeArchived bool, remoteRepoChan chan remoteRepo) error {
+func (gl GitlabRepoProvider) ListReposByUser(ctx context.Context, client *gitlab.Client, user string, includeArchived bool, remoteRepoChan chan RemoteRepo) error {
 	opt := gitlab.ListProjectsOptions{
 		ListOptions:    defaultGitlabListOptions,
 		MinAccessLevel: gitlab.Ptr(gitlab.DeveloperPermissions),
@@ -326,6 +344,7 @@ func (gl GitlabRepoProvider) ListReposByUser(ctx context.Context, client *gitlab
 		thisIterationOpt := opt
 		gitlabRequestPool.Go(func(ctx context.Context) error {
 			if ctx.Err() != nil {
+				contextCancelled = true
 				return fmt.Errorf("context cancelled, not making request: %w", ctx.Err())
 			}
 			ps, resp, err := client.Projects.ListUserProjects(user, &thisIterationOpt)
@@ -338,10 +357,11 @@ func (gl GitlabRepoProvider) ListReposByUser(ctx context.Context, client *gitlab
 					continue
 				}
 
-				r := remoteRepo{
-					cloneUrl:      p.HTTPURLToRepo,
-					isArchived:    p.Archived,
-					defaultBranch: p.DefaultBranch,
+				r := RemoteRepo{
+					RepoName:      MustParseRepoName(p.WebURL),
+					CloneUrl:      p.HTTPURLToRepo,
+					IsArchived:    p.Archived,
+					DefaultBranch: p.DefaultBranch,
 				}
 
 				remoteRepoChan <- r
@@ -361,4 +381,26 @@ func (gl GitlabRepoProvider) ListReposByUser(ctx context.Context, client *gitlab
 	}
 
 	return nil
+}
+
+func (gl GitlabRepoProvider) GetRepo(ctx context.Context, repoName string) (RemoteRepo, error) {
+	client, err := gl.getClient()
+	if err != nil {
+		return RemoteRepo{}, fmt.Errorf("error creating gitlab client: %w", err)
+	}
+
+	p, _, err := client.Projects.GetProject(repoName, nil)
+	if errors.Is(err, gitlab.ErrNotFound) {
+		return RemoteRepo{}, ErrRepoNotFound
+	}
+	if err != nil {
+		return RemoteRepo{}, fmt.Errorf("error getting project %s: %w", repoName, err)
+	}
+
+	return RemoteRepo{
+		RepoName:      MustParseRepoName(p.WebURL),
+		CloneUrl:      p.HTTPURLToRepo,
+		IsArchived:    p.Archived,
+		DefaultBranch: p.DefaultBranch,
+	}, nil
 }
