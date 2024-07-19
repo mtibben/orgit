@@ -119,8 +119,7 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive, tidy 
 	}
 
 	workerPoolWait()
-
-	if tidy {
+	if tidy && ctx.Err() != context.Canceled {
 		logger.Info("Tidying...")
 		tidier := TidyAction{
 			repoProvider: repoProvider,
