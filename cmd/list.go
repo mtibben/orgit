@@ -15,7 +15,8 @@ import (
 )
 
 var ignoreDirs []string = []string{
-	".archive", // compatibility with git-workspace
+	archiveDir, // compatibility with git-workspace
+	trashDir,
 }
 
 func cleanString(s string) string {

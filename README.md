@@ -98,6 +98,7 @@ If you wish to use SSH transport instead of HTTPS, you can override the URL in y
  - ~fix error stats on graceful shutdown. Race condition, need to synchronise cancel and progress printer~
  - ~--tidy: - find directories not part of remote~
  - ~handle moved repos~
+ - stage cloned repos so tidy can move existing repos
  - don't include skipped updates in stats
  - list --status --tree
  - oauth2 authentication

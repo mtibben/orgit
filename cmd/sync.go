@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -62,21 +65,23 @@ func init() {
 	rootCmd.AddCommand(cmdSync)
 }
 
+var dryRun = false
+
 func doSync(ctx context.Context, orgUrlStr string, clone, update, archive, tidy bool, loglevel string) (err error) {
 	ctx, ctxCancel := context.WithCancel(ctx)
 
 	logger := NewProgressLogger(loglevel)
-	defer logger.EndProgressLine("done")
 
 	workerPool := NewSyncReposWorkerPool(ctx, clone, update, archive, logger)
 	var workerPoolWait = sync.OnceFunc(func() {
 		werr := workerPool.Wait()
 		if werr != nil {
-			logger.Info("Sync didn't fully complete")
+			logger.EndProgressLine("didn't fully complete")
 		}
 		if err == nil {
 			err = werr
 		}
+		logger.EndProgressLine("done")
 	})
 	defer workerPoolWait()
 
@@ -109,44 +114,30 @@ func doSync(ctx context.Context, orgUrlStr string, clone, update, archive, tidy 
 
 	err = repoProvider.ListRepos(ctx, repoPath.Path, archive, workerPool.remoteReposChan)
 	close(workerPool.remoteReposChan) // close the channel to signal that no more repos will be sent
-
-	if tidy {
-		workerPoolWait()
-
-		tidier := TidyAction{
-			repoProvider: repoProvider,
-			localDir:     repoPath.LocalPathAbsolute(),
-			logger:       logger,
-		}
-
-		wg := sync.WaitGroup{}
-		forEachGitDirIn(repoPath.LocalPathAbsolute(), func(relativeDir string) {
-			repoNameString := filepath.Join(repoPath.String(), relativeDir)
-			reponame := MustParseRepoName(repoNameString)
-
-			if !workerPool.HasProcessedRepo(reponame.String()) {
-				wg.Add(1)
-				go func(reponame RepoName) {
-					defer wg.Done()
-
-					err := tidier.doTidy(ctx, reponame)
-					if err != nil {
-						logger.Info(err.Error())
-					}
-				}(reponame)
-			}
-		})
-		wg.Wait()
-	}
-
 	if err != nil && !errors.Is(err, context.Canceled) {
 		err = fmt.Errorf("couldn't list repos for '%s': %w", orgUrlStr, err)
+	}
+
+	workerPoolWait()
+
+	if tidy {
+		logger.Info("Tidying...")
+		tidier := TidyAction{
+			repoProvider: repoProvider,
+			logger:       logger,
+			remoteRepos:  workerPool.getAllRemoteRepos(),
+		}
+		tidier.Tidy(ctx, repoPath)
 	}
 
 	return err
 }
 
 func osMove(oldpath, newpath string) error {
+	if dryRun {
+		return nil
+	}
+
 	err := os.MkdirAll(filepath.Dir(newpath), 0755)
 	if err != nil {
 		return fmt.Errorf("couldn't create parent dir: %w", err)
@@ -160,23 +151,118 @@ func osMove(oldpath, newpath string) error {
 
 type TidyAction struct {
 	repoProvider RepoProvider
-	localDir     string
 	logger       *ProgressLogger
+	remoteRepos  []string
+}
+
+func (t *TidyAction) Tidy(ctx context.Context, repoPath RepoName) {
+	wg := sync.WaitGroup{}
+	err := fs.WalkDir(os.DirFS(getWorkspaceDir()), repoPath.String(), func(relativePath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			panic(err)
+		}
+
+		if !d.IsDir() {
+			return t.Trash(relativePath)
+		}
+
+		if slices.Contains(ignoreDirs, d.Name()) {
+			return fs.SkipDir
+		}
+
+		if t.HasAlreadyProcessedRepo(relativePath) {
+			return fs.SkipDir
+		}
+
+		if t.IsParentDirectoryForProcessedRepo(relativePath) {
+			return nil
+		}
+
+		absolutePath := filepath.Join(getWorkspaceDir(), relativePath)
+
+		if isGitRepo(absolutePath) {
+			reponame := MustParseRepoName(relativePath)
+
+			wg.Add(1)
+			go func(reponame RepoName) {
+				defer wg.Done()
+				tidyErr := t.doTidy(ctx, reponame)
+				if tidyErr != nil {
+					t.logger.Info(tidyErr.Error())
+				}
+			}(reponame)
+
+			return fs.SkipDir
+		}
+
+		err = t.Trash(relativePath)
+		if err != nil {
+			t.logger.Info(err.Error())
+		}
+
+		return fs.SkipDir
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	wg.Wait()
+}
+
+// FIXME: remoteRepos is in blah/one/two but pathname is a file path which will cause issues on windows
+func (t *TidyAction) HasAlreadyProcessedRepo(pathname string) bool {
+	for _, r := range t.remoteRepos {
+		if pathname == r {
+			return true
+		}
+
+		// check if r is a parent directory of pathname
+		if strings.HasPrefix(pathname, r+string(filepath.Separator)) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// FIXME: remoteRepos is in blah/one/two but pathname is a file path which will cause issues on windows
+func (t *TidyAction) IsParentDirectoryForProcessedRepo(pathname string) bool {
+	for _, r := range t.remoteRepos {
+		if strings.HasPrefix(r, pathname+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *TidyAction) Trash(pathRelative string) error {
+	pathAbsolute := filepath.Join(getWorkspaceDir(), pathRelative)
+	trashPath := filepath.Join(getTrashDir(), pathRelative)
+
+	err := osMove(pathAbsolute, trashPath)
+	if err != nil {
+		return fmt.Errorf("couldn't move '%s' to '%s': %w", pathRelative, trashPath, err)
+	}
+	t.logger.Info(fmt.Sprintf("Moved '%s' to '%s'", pathAbsolute, trashPath))
+
+	return nil
 }
 
 func (t *TidyAction) doTidy(ctx context.Context, oldRepoName RepoName) error {
 	newRepo, err := t.repoProvider.GetRepo(ctx, oldRepoName.Path)
 	if errors.Is(err, ErrRepoNotFound) {
-		trashDir := filepath.Join(getTrashDir(), oldRepoName.String())
-
-		err = osMove(oldRepoName.LocalPathAbsolute(), trashDir)
+		err = t.Trash(oldRepoName.String())
 		if err != nil {
-			return fmt.Errorf("couldn't move '%s' to '%s': %w", oldRepoName, trashDir, err)
+			return fmt.Errorf("couldn't trash '%s': %w", oldRepoName.String(), err)
+		} else {
+			return nil
 		}
-		t.logger.Info(fmt.Sprintf("Moved '%s' to '%s'", oldRepoName.LocalPathAbsolute(), trashDir))
-	} else if err != nil {
+	}
+	if err != nil {
 		return fmt.Errorf("couldn't get repo '%s': %w", oldRepoName.String(), err)
-	} else if newRepo.RepoName.LocalPathAbsolute() != oldRepoName.LocalPathAbsolute() {
+	}
+
+	if newRepo.RepoName.LocalPathAbsolute() != oldRepoName.LocalPathAbsolute() {
 		if dirExists(newRepo.RepoName.LocalPathAbsolute()) {
 			return fmt.Errorf("couldn't tidy '%s', dir '%s' already exists", oldRepoName.String(), newRepo.RepoName.LocalPathAbsolute())
 		}
@@ -227,9 +313,12 @@ func NewSyncReposWorkerPool(ctx context.Context, clone, update, archive bool, pr
 	return p
 }
 
-func (p *syncReposWorkerPool) HasProcessedRepo(repoName string) bool {
-	_, ok := p.remoteRepos.Load(repoName)
-	return ok
+func (p *syncReposWorkerPool) getAllRemoteRepos() (repos []string) {
+	p.remoteRepos.Range(func(key, value interface{}) bool {
+		repos = append(repos, key.(string))
+		return true
+	})
+	return
 }
 
 func (p *syncReposWorkerPool) createJob(r RemoteRepo) func(context.Context) error {
