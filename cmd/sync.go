@@ -262,10 +262,6 @@ func (t *TidyAction) doTidy(ctx context.Context, oldRepoName RepoName) error {
 	}
 
 	if newRepo.RepoName.LocalPathAbsolute() != oldRepoName.LocalPathAbsolute() {
-		if dirExists(newRepo.RepoName.LocalPathAbsolute()) {
-			return fmt.Errorf("couldn't tidy '%s', dir '%s' already exists", oldRepoName.String(), newRepo.RepoName.LocalPathAbsolute())
-		}
-
 		err := osMove(oldRepoName.LocalPathAbsolute(), newRepo.RepoName.LocalPathAbsolute())
 		if err != nil {
 			return fmt.Errorf("couldn't move '%s' to '%s': %w", oldRepoName.LocalPathAbsolute(), newRepo.RepoName.LocalPathAbsolute(), err)
